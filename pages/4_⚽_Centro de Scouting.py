@@ -1067,7 +1067,7 @@ with st.sidebar:
         st.switch_page("pages/1_🔍_Jugadores.py")
     
     if st.button("📋 Mis Informes", use_container_width=True):
-        st.switch_page("pages/9_📋_Mis_Informes.py")
+        st.switch_page("pages/5_📋_Mis_Informes.py")
     
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         login_manager.logout()

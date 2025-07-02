@@ -64,3 +64,8 @@ logs/
 
 # PDFs generados temporalmente
 *.pdf
+
+# Añadir al .gitignore:
+desktop.ini
+Thumbs.db
+.DS_Store

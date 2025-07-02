@@ -117,8 +117,8 @@ Este proyecto fue desarrollado como Trabajo de Fin de Máster. Para contribucion
 📄 Licencia
 Proyecto académico - Todos los derechos reservados.
 📞 Contacto
-Desarrollador: [Tu Nombre]
-Email: [tu-email@ejemplo.com]
+Desarrollador: Manuel Pérez Ruda
+Email: perezrudamanuel@gmail.com
 Máster: Máster en Python Avanzado Aplicado al Deporte
 
 Desarrollado con ❤️ para profesionales del fútbol

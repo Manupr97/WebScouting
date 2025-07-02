@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 import random
 
+
 # Configuración de la página
 st.set_page_config(
     page_title="Dashboard de Scouting - Scouting Pro",
@@ -378,7 +379,7 @@ def crear_card_jugador_compacta(jugador_data, tipo_recomendacion):
                 'equipo': equipo,
                 'datos_completos': jugador_data
             }
-            st.switch_page("pages/9_📋_Mis_Informes.py")
+            st.switch_page("pages/5_📋_Mis_Informes.py")
 
 def crear_card_jugador_discovery(talento_data):
     """Crea una card elegante para el discovery hub con botón de lista de visualización"""
@@ -923,10 +924,10 @@ with st.sidebar:
     st.markdown("### 🚀 Acciones Rápidas")
     
     if st.button("📋 Ver Todos los Informes", use_container_width=True):
-        st.switch_page("pages/9_📋_Mis_Informes.py")
+        st.switch_page("pages/5_📋_Mis_Informes.py")
     
     if st.button("📊 Análisis Avanzado", use_container_width=True):
-        st.switch_page("pages/2_📊_Visualizaciones.py")
+        st.switch_page("pages/3_📊_Visualizaciones.py")
     
     st.markdown("---")
     
@@ -960,7 +961,7 @@ with st.sidebar:
             st.metric("👤 Sin Scout Asignado", stats_lista["sin_scout"])
             
             if st.button("📋 Ver Lista Completa", use_container_width=True):
-                st.switch_page("pages/10_👀_Lista_Visualizacion.py")
+                st.switch_page("pages/6_👀_Lista_Visualizacion.py")
                 
     except Exception:
         pass

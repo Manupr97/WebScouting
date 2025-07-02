@@ -433,7 +433,7 @@ else:
             st.switch_page("pages/1_🔍_Jugadores.py")
         
         if st.button("📊 **Visualizaciones**", use_container_width=True):
-            st.switch_page("pages/2_📊_Visualizaciones.py")
+            st.switch_page("pages/3_📊_Visualizaciones.py")
         
         if st.button("📋 **Base de Datos**", use_container_width=True):
             st.switch_page("pages/2_📊_Bases_Datos_Unificadas.py")
@@ -863,12 +863,12 @@ else:
         
         with col_pend1:
             if st.button("👀 Ver Lista de Visualización", use_container_width=True, type="primary"):
-                st.switch_page("pages/10_👀_Lista_Visualizacion.py")
+                st.switch_page("pages/6_👀_Lista_Visualizacion.py")
             st.caption("Gestiona tus jugadores objetivo")
         
         with col_pend2:
             if st.button("⚽ Partidos en Vivo", use_container_width=True, type="primary"):
-                st.switch_page("pages/5_⚽_Centro de Scouting.py")
+                st.switch_page("pages/4_⚽_Centro de Scouting.py")
             st.caption("Observa jugadores en acción")
 
     elif estado_usuario['partidos_hoy'] > 0:
@@ -883,7 +883,7 @@ else:
         """, unsafe_allow_html=True)
         
         if st.button("🎯 Ir a Scouting en Vivo", use_container_width=True, type="primary"):
-            st.switch_page("pages/5_⚽_Centro de Scouting.py")
+            st.switch_page("pages/4_⚽_Centro de Scouting.py")
 
     else:
         # Usuario experimentado - Opciones avanzadas
@@ -900,12 +900,12 @@ else:
         
         with col_exp1:
             if st.button("📊 Análisis Avanzado", use_container_width=True):
-                st.switch_page("pages/2_📊_Visualizaciones.py")
+                st.switch_page("pages/3_📊_Visualizaciones.py")
             st.caption("Radar, dispersión, correlaciones")
         
         with col_exp2:
             if st.button("📋 Mis Informes", use_container_width=True):
-                st.switch_page("pages/9_📋_Mis_Informes.py")
+                st.switch_page("pages/5_📋_Mis_Informes.py")
             st.caption(f"Gestiona tus {estado_usuario['cantidad_informes']} informes")
         
         with col_exp3:
@@ -925,15 +925,15 @@ else:
 
     with quick_col2:
         if st.button("📊 Visualizar", use_container_width=True):
-            st.switch_page("pages/2_📊_Visualizaciones.py")
+            st.switch_page("pages/3_📊_Visualizaciones.py")
 
     with quick_col3:
         if st.button("⚽ Observar", use_container_width=True):
-            st.switch_page("pages/5_⚽_Centro de Scouting.py")
+            st.switch_page("pages/4_⚽_Centro de Scouting.py")
 
     with quick_col4:
         if st.button("📋 Informes", use_container_width=True):
-            st.switch_page("pages/9_📋_Mis_Informes.py")
+            st.switch_page("pages/5_📋_Mis_Informes.py")
     
     # === FOOTER CORPORATIVO ===
     st.markdown(f"""

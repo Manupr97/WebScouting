@@ -582,17 +582,13 @@ with tab1:
             
             # Botones de acción
             st.markdown("#### Acciones")
-            col_a1, col_a2, col_a3 = st.columns(3)
+            col_a1, col_a2 = st.columns(2)
             
             with col_a1:
                 if st.button("📊 Análisis", use_container_width=True):
-                    st.switch_page("pages/2_📊_Visualizaciones.py")
+                    st.switch_page("pages/3_📊_Visualizaciones.py")
             
             with col_a2:
-                if st.button("📈 Gráficos", use_container_width=True):
-                    st.switch_page("pages/2_📊_Visualizaciones.py")
-            
-            with col_a3:
                 csv = df_filtrado[columnas_mostrar].to_csv(index=False)
                 st.download_button(
                     "📁 Exportar CSV",
@@ -698,7 +694,7 @@ with tab2:
         st.write("Crea informes de scouting para llenar tu base personal.")
         
         if st.button("⚽ Crear Informe", use_container_width=True):
-            st.switch_page("pages/5_⚽_Centro de Scouting.py")
+            st.switch_page("pages/4_⚽_Centro de Scouting.py")
 
 # ==================== PESTAÑA 3: LISTA OBJETIVOS ====================
 with tab3:
@@ -836,13 +832,13 @@ with st.sidebar:
         st.switch_page("pages/1_🔍_Jugadores.py")
     
     if st.button("📊 Visualizaciones", use_container_width=True):
-        st.switch_page("pages/2_📊_Visualizaciones.py")
+        st.switch_page("pages/3_📊_Visualizaciones.py")
     
     if st.button("⚽ Scouting en Vivo", use_container_width=True):
-        st.switch_page("pages/5_⚽_Centro de Scouting.py")
+        st.switch_page("pages/4_⚽_Centro de Scouting.py")
     
     if st.button("📋 Mis Informes", use_container_width=True):
-        st.switch_page("pages/9_📋_Mis_Informes.py")
+        st.switch_page("pages/4_📋_Mis_Informes.py")
     
     st.markdown("---")
     
