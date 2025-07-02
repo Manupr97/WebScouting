@@ -1,0 +1,51 @@
+[theme]
+primaryColor = "#24282a"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[server]
+# Puerto por defecto
+port = 8501
+
+# Configuración de memoria
+maxCachedMessageSize = 200
+
+# WebSocket
+enableWebsocketCompression = true
+
+# CORS
+enableCORS = false
+
+# Xsrf
+enableXsrfProtection = true
+
+[browser]
+# No recopilar estadísticas de uso
+gatherUsageStats = false
+
+# Cache del servidor
+serverAddress = "localhost"
+serverPort = 8501
+
+[runner]
+# Magia rápida deshabilitada para mejor rendimiento
+magicEnabled = false
+
+# Reruns rápidos
+fastReruns = true
+
+# Instalación de paquetes
+installTracker = false
+
+[logger]
+# Nivel de log (cambiar a "warning" en producción)
+level = "info"
+
+[client]
+# Mostrar errores
+showErrorDetails = true
+
+# Herramientas de desarrollo
+toolbarMode = "auto"
