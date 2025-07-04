@@ -4,7 +4,7 @@ from datetime import datetime, date, timedelta
 import sys
 import os
 import json
-
+import time
 
 # Añadir el directorio raíz al path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +14,8 @@ sys.path.append(parent_dir)
 # Imports del sistema
 from common.login import LoginManager
 from models.partido_model import PartidoModel
+
+partido_model = PartidoModel()
 
 # Import del scraper de BeSoccer CORREGIDO
 try:
@@ -113,13 +115,24 @@ st.markdown("""
         font-size: 1.2em;
     }
     
-    /* Formulario de evaluación */
+    /* Formulario más compacto */
     .eval-form {
         background: #f8f9fa;
-        padding: 2rem;
-        border-radius: 12px;
-        border: 2px solid #007bff;
-        margin: 2rem 0;
+        padding: 1.5rem;  /* Reducido de 2rem */
+        border-radius: 10px;
+        border: 1px solid #dee2e6;  /* Borde más sutil */
+        margin: 1rem 0;  /* Menos margen */
+    }
+            
+    /* Métricas más compactas */
+    [data-testid="metric-container"] {
+        padding: 0.5rem;
+    }
+            
+    /* Expanders más compactos */
+    .streamlit-expanderHeader {
+        font-size: 0.95em;
+        padding: 0.5rem;
     }
     
     .jugador-seleccionado {
@@ -215,7 +228,6 @@ if not login_manager.is_authenticated():
     st.stop()
 
 current_user = login_manager.get_current_user()
-partido_model = PartidoModel()
 
 # Header principal
 st.markdown(f"""
@@ -284,7 +296,8 @@ def buscar_alineaciones_automatico(partido):
         resultado = obtener_alineaciones_besoccer(
             besoccer_id,
             partido.get('equipo_local', ''),
-            partido.get('equipo_visitante', '')
+            partido.get('equipo_visitante', ''),
+            fecha_partido=partido.get('fecha')
         )
         
         if resultado and resultado.get('encontrado'):
@@ -327,7 +340,8 @@ def buscar_alineaciones_manual(partido):
         resultado = obtener_alineaciones_besoccer(
             besoccer_id,
             partido.get('equipo_local', ''),
-            partido.get('equipo_visitante', '')
+            partido.get('equipo_visitante', ''),
+            fecha_partido=partido.get('fecha')
         )
         
         progress_bar.progress(75)
@@ -372,13 +386,14 @@ def buscar_alineaciones_manual(partido):
         return None
 
 def cargar_partidos_limpio(fecha_str):
-    """FUNCIÓN CORREGIDA: Carga partidos con interface LIMPIA"""
+    """FUNCIÓN CORREGIDA: Carga partidos con interface LIMPIA - SIN CACHE DE SESSION STATE"""
     if not BESOCCER_DISPONIBLE:
         return partido_model.obtener_partidos_por_fecha(fecha_str)
     
     try:
         print(f"🔍 Carga limpia para {fecha_str}")
         
+        # IMPORTANTE: No usar cache de session state, siempre buscar nuevos
         scraper_livescore = BeSoccerAlineacionesScraper()
         partidos_livescore = scraper_livescore.buscar_partidos_en_fecha(fecha_str)
         
@@ -391,7 +406,7 @@ def cargar_partidos_limpio(fecha_str):
         
         for p in partidos_livescore:
             partido_convertido = {
-                'id': f"livescore_{p['match_id']}",
+                'id': f"livescore_{p['match_id']}_{fecha_str}",  # Añadir fecha al ID para evitar cache
                 'fecha': fecha_str,
                 'hora': p.get('hora', 'TBD'),
                 'equipo_local': p['equipo_local'],
@@ -415,6 +430,413 @@ def cargar_partidos_limpio(fecha_str):
         return partido_model.obtener_partidos_por_fecha(fecha_str)
 
 # ================================
+# FUNCIONES DEL FORMULARIO DE CAMPO
+# ================================
+
+def mostrar_formulario_evaluacion_campo(player, partido):
+    """
+    Muestra el formulario de evaluación rápida para uso durante el partido
+    """
+    
+    # Inicializar estados si no existen
+    if 'acciones_partido' not in st.session_state:
+        st.session_state.acciones_partido = {
+            'positivas': 0,
+            'neutras': 0,
+            'negativas': 0,
+            'eventos': []
+        }
+    
+    if 'evaluacion_temporal' not in st.session_state:
+        st.session_state.evaluacion_temporal = {}
+    
+    st.markdown('<div class="eval-form">', unsafe_allow_html=True)
+    
+    # Header compacto del jugador con selector de posición
+    col_info1, col_info2 = st.columns([2, 1])
+    
+    with col_info1:
+        st.markdown(f"""
+        <div class="jugador-seleccionado">
+            <h3 style="margin: 0;">📝 {player['nombre']} (#{player['numero']})</h3>
+            <p style="margin: 0;">{player['equipo']} {' • 🎯 Objetivo' if player['es_objetivo'] else ''}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col_info2:
+        # Selector de posición REAL en el partido
+        posiciones = [
+            'Portero', 'Central', 'Lateral Derecho', 'Lateral Izquierdo',
+            'Mediocentro Defensivo', 'Mediocentro', 'Media Punta',
+            'Extremo Derecho', 'Extremo Izquierdo', 'Delantero'
+        ]
+        
+        # Intentar preseleccionar basado en posición de BeSoccer
+        posicion_besoccer = player.get('posicion', 'Mediocentro')
+        try:
+            index_default = next(i for i, p in enumerate(posiciones) 
+                               if posicion_besoccer.lower() in p.lower())
+        except:
+            index_default = 5  # Mediocentro por defecto
+        
+        posicion_real = st.selectbox(
+            "📍 Posición real:",
+            posiciones,
+            index=index_default,
+            key=f"posicion_real_{player['nombre']}"
+        )
+        
+        # Guardar la posición seleccionada
+        st.session_state.evaluacion_temporal['posicion_real'] = posicion_real
+    
+    st.markdown("---")
+    
+    # SECCIÓN 1: CAPTURA RÁPIDA MEJORADA
+    st.subheader("⚡ Registro de Acciones")
+    
+    # Primero el minuto y la nota
+    col_minuto, col_nota = st.columns([1, 3])
+    
+    with col_minuto:
+        minuto_actual = st.number_input(
+            "⏱️ Min:",
+            min_value=1,
+            max_value=120,
+            value=st.session_state.get('minuto_actual', 1),
+            key="input_minuto",
+            step=1
+        )
+        st.session_state.minuto_actual = minuto_actual
+    
+    with col_nota:
+        nota_rapida = st.text_input(
+            "💭 Descripción (opcional):",
+            placeholder="Ej: Gran pase entre líneas, Fallo en el marcaje...",
+            key="nota_rapida"
+        )
+    
+    # Luego los botones de acción
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    
+    with col_btn1:
+        if st.button("✅ POSITIVA", key="btn_positivo", use_container_width=True, type="primary"):
+            st.session_state.acciones_partido['positivas'] += 1
+            evento = {
+                'minuto': minuto_actual,
+                'tipo': 'positivo',
+                'nota': nota_rapida if nota_rapida else 'Acción positiva'
+            }
+            st.session_state.acciones_partido['eventos'].append(evento)
+            st.success(f"✅ Min {minuto_actual}: {evento['nota']}")
+            
+    
+    with col_btn2:
+        if st.button("➖ NEUTRA", key="btn_neutro", use_container_width=True):
+            st.session_state.acciones_partido['neutras'] += 1
+            evento = {
+                'minuto': minuto_actual,
+                'tipo': 'neutro',
+                'nota': nota_rapida if nota_rapida else 'Acción neutra'
+            }
+            st.session_state.acciones_partido['eventos'].append(evento)
+            st.info(f"➖ Min {minuto_actual}: {evento['nota']}")
+            
+    
+    with col_btn3:
+        if st.button("❌ NEGATIVA", key="btn_negativo", use_container_width=True):
+            st.session_state.acciones_partido['negativas'] += 1
+            evento = {
+                'minuto': minuto_actual,
+                'tipo': 'negativo',
+                'nota': nota_rapida if nota_rapida else 'Acción negativa'
+            }
+            st.session_state.acciones_partido['eventos'].append(evento)
+            st.error(f"❌ Min {minuto_actual}: {evento['nota']}")
+            
+    
+    # SECCIÓN 2: RESUMEN COMPACTO
+    st.markdown("### 📊 Resumen")
+    col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+    
+    with col_stats1:
+        total = (st.session_state.acciones_partido['positivas'] + 
+                st.session_state.acciones_partido['neutras'] + 
+                st.session_state.acciones_partido['negativas'])
+        st.metric("Total", total)
+    
+    with col_stats2:
+        st.metric("✅ Positivas", st.session_state.acciones_partido['positivas'], 
+                 delta=f"{st.session_state.acciones_partido['positivas']}/{total}" if total > 0 else "0")
+    
+    with col_stats3:
+        st.metric("➖ Neutras", st.session_state.acciones_partido['neutras'])
+    
+    with col_stats4:
+        st.metric("❌ Negativas", st.session_state.acciones_partido['negativas'],
+                 delta=f"-{st.session_state.acciones_partido['negativas']}/{total}" if total > 0 else "0")
+    
+    # SECCIÓN 3: EVALUACIÓN RÁPIDA (Más compacta)
+    with st.expander("📋 Evaluación Detallada (pausas/descanso)", expanded=False):
+        
+        # Nota general en la misma línea
+        col_nota1, col_nota2 = st.columns([1, 3])
+        with col_nota1:
+            nota_general = st.number_input(
+                "🌟 Nota General",
+                min_value=1,
+                max_value=10,
+                value=st.session_state.evaluacion_temporal.get('nota_general', 5),
+                key="nota_general_campo"
+            )
+            st.session_state.evaluacion_temporal['nota_general'] = nota_general
+        
+        with col_nota2:
+            st.info("💡 Completa los aspectos específicos durante las pausas del partido")
+        
+        # Aspectos según posición en grid de 2 columnas
+        st.markdown("**Aspectos específicos:**")
+        
+        aspectos_por_posicion = {
+            'Portero': {
+                'Paradas y reflejos': 5,
+                'Juego con pies': 5,
+                'Salidas': 5,
+                'Comunicación': 5
+            },
+            'Central': {
+                'Marcaje': 5,
+                'Juego aéreo': 5,
+                'Salida de balón': 5,
+                'Posicionamiento': 5
+            },
+            'Lateral Derecho': {
+                'Defensa 1v1': 5,
+                'Apoyo ofensivo': 5,
+                'Centros': 5,
+                'Físico': 5
+            },
+            'Lateral Izquierdo': {
+                'Defensa 1v1': 5,
+                'Apoyo ofensivo': 5,
+                'Centros': 5,
+                'Físico': 5
+            },
+            'Mediocentro Defensivo': {
+                'Recuperación': 5,
+                'Distribución': 5,
+                'Posicionamiento': 5,
+                'Duelos': 5
+            },
+            'Mediocentro': {
+                'Pase': 5,
+                'Visión de juego': 5,
+                'Recuperación': 5,
+                'Llegada': 5
+            },
+            'Media Punta': {
+                'Creatividad': 5,
+                'Último pase': 5,
+                'Finalización': 5,
+                'Movilidad': 5
+            },
+            'Extremo Derecho': {
+                'Regate': 5,
+                'Velocidad': 5,
+                'Centros': 5,
+                'Finalización': 5
+            },
+            'Extremo Izquierdo': {
+                'Regate': 5,
+                'Velocidad': 5,
+                'Centros': 5,
+                'Finalización': 5
+            },
+            'Delantero': {
+                'Finalización': 5,
+                'Desmarques': 5,
+                'Juego aéreo': 5,
+                'Pressing': 5
+            }
+        }
+        
+        aspectos = aspectos_por_posicion.get(posicion_real, aspectos_por_posicion['Mediocentro'])
+        
+        # Crear grid de 2 columnas para aspectos
+        cols = st.columns(2)
+        for i, (aspecto, valor_default) in enumerate(aspectos.items()):
+            with cols[i % 2]:
+                valor = st.slider(
+                    f"{aspecto}",
+                    min_value=1,
+                    max_value=10,
+                    value=st.session_state.evaluacion_temporal.get(f'aspecto_{aspecto}', valor_default),
+                    key=f"slider_{aspecto}"
+                )
+                st.session_state.evaluacion_temporal[f'aspecto_{aspecto}'] = valor
+        
+        # Observaciones
+        st.markdown("**Observaciones:**")
+        obs_general = st.text_area(
+            "Notas generales:",
+            value=st.session_state.evaluacion_temporal.get('obs_general', ''),
+            placeholder="Aspectos destacados, evolución durante el partido, etc...",
+            height=80,
+            key="obs_general_campo"
+        )
+        st.session_state.evaluacion_temporal['obs_general'] = obs_general
+    
+    # SECCIÓN 4: ÚLTIMOS EVENTOS (Más compacto)
+    if st.session_state.acciones_partido['eventos']:
+        with st.expander(f"📜 Últimos eventos ({len(st.session_state.acciones_partido['eventos'])})", expanded=False):
+            # Mostrar solo los últimos 5 eventos
+            for evento in reversed(st.session_state.acciones_partido['eventos'][-5:]):
+                if evento['tipo'] == 'positivo':
+                    st.success(f"**Min {evento['minuto']}**: {evento['nota']}")
+                elif evento['tipo'] == 'neutro':
+                    st.info(f"**Min {evento['minuto']}**: {evento['nota']}")
+                else:
+                    st.error(f"**Min {evento['minuto']}**: {evento['nota']}")
+    
+    # SECCIÓN 5: BOTONES DE ACCIÓN
+    st.markdown("---")
+    col_btn_final1, col_btn_final2, col_btn_final3 = st.columns([1, 1, 1])
+    
+    with col_btn_final1:
+        if st.button("💾 Guardar Borrador", key="btn_guardar_borrador", use_container_width=True):
+            guardar_evaluacion_temporal(player, partido, posicion_real)
+            st.success("✅ Borrador guardado")
+    
+    with col_btn_final2:
+        if st.button("🔄 Limpiar", key="btn_limpiar", use_container_width=True):
+            if st.session_state.acciones_partido['eventos']:
+                limpiar_estados_evaluacion()
+                st.info("🔄 Formulario limpio")
+    
+    with col_btn_final3:
+        if st.button("✅ FINALIZAR", key="btn_guardar_informe", 
+                     use_container_width=True, type="primary"):
+            if guardar_informe_final_campo(player, partido, posicion_real):
+                st.success("✅ Informe guardado exitosamente")
+                time.sleep(1)
+                limpiar_estados_evaluacion()
+                st.session_state.jugador_evaluando = None
+                st.rerun()  # Solo aquí hacemos rerun
+            else:
+                st.error("❌ Error al guardar el informe")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def guardar_evaluacion_temporal(player, partido, posicion_real):
+    """Guarda la evaluación temporal en session_state"""
+    
+    evaluacion_completa = {
+        'jugador': player,
+        'partido': partido,
+        'posicion_real': posicion_real,
+        'fecha_evaluacion': datetime.now(),
+        'acciones': st.session_state.acciones_partido.copy(),
+        'evaluacion': st.session_state.evaluacion_temporal.copy(),
+        'tipo_evaluacion': 'campo'
+    }
+    
+    # Guardar con ID único
+    eval_id = f"{player['nombre']}_{partido['id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    if 'evaluaciones_guardadas' not in st.session_state:
+        st.session_state.evaluaciones_guardadas = {}
+    
+    st.session_state.evaluaciones_guardadas[eval_id] = evaluacion_completa
+
+
+def guardar_informe_final_campo(player, partido, posicion_real):
+    """Prepara y guarda el informe final en la base de datos"""
+    
+    try:
+        # Calcular estadísticas
+        total_acciones = (st.session_state.acciones_partido['positivas'] + 
+                         st.session_state.acciones_partido['neutras'] + 
+                         st.session_state.acciones_partido['negativas'])
+        
+        if total_acciones > 0:
+            porcentaje_positivas = (st.session_state.acciones_partido['positivas'] / total_acciones) * 100
+        else:
+            porcentaje_positivas = 0
+        
+        # Preparar observaciones
+        observaciones = f"""
+EVALUACIÓN EN CAMPO - {posicion_real}
+
+Acciones registradas:
+- Positivas: {st.session_state.acciones_partido['positivas']} ({porcentaje_positivas:.1f}%)
+- Neutras: {st.session_state.acciones_partido['neutras']}
+- Negativas: {st.session_state.acciones_partido['negativas']}
+
+Primera Parte: {st.session_state.evaluacion_temporal.get('obs_primera', 'Sin observaciones')}
+
+Segunda Parte: {st.session_state.evaluacion_temporal.get('obs_segunda', 'Sin observaciones')}
+        """
+        
+        # Recopilar fortalezas y debilidades basadas en evaluación
+        fortalezas = []
+        debilidades = []
+        
+        for key, value in st.session_state.evaluacion_temporal.items():
+            if key.startswith('aspecto_') and value >= 7:
+                aspecto_nombre = key.replace('aspecto_', '')
+                fortalezas.append(f"{aspecto_nombre}: {value}/10")
+            elif key.startswith('aspecto_') and value <= 4:
+                aspecto_nombre = key.replace('aspecto_', '')
+                debilidades.append(f"{aspecto_nombre}: {value}/10")
+        
+        # Determinar recomendación basada en nota general
+        nota_general = st.session_state.evaluacion_temporal.get('nota_general', 5)
+        if nota_general >= 7:
+            recomendacion = 'fichar'
+        elif nota_general >= 5:
+            recomendacion = 'seguir_observando'
+        else:
+            recomendacion = 'descartar'
+        
+        # Preparar datos para partido_model
+        informe_data = {
+            'partido_id': partido['id'],
+            'jugador_nombre': player['nombre'],
+            'equipo': player['equipo'],
+            'posicion': posicion_real,  # Usamos la posición real, no la de BeSoccer
+            'scout_usuario': current_user['usuario'],  # Usar el current_user del contexto global
+            'nota_general': nota_general,
+            'potencial': 'medio',  # Por defecto en evaluación de campo
+            'recomendacion': recomendacion,
+            'observaciones': observaciones.strip(),
+            'minutos_observados': st.session_state.get('minuto_actual', 90),
+            'fortalezas': ', '.join(fortalezas) if fortalezas else 'Por determinar',
+            'debilidades': ', '.join(debilidades) if debilidades else 'Por determinar',
+            'tipo_evaluacion': 'campo'
+        }
+        
+        # Llamar a partido_model para guardar
+        informe_id = partido_model.crear_informe_scouting(informe_data)
+        return True
+        
+    except Exception as e:
+        print(f"Error al guardar informe: {str(e)}")
+        return False
+
+
+def limpiar_estados_evaluacion():
+    """Limpia los estados temporales después de guardar"""
+    
+    if 'acciones_partido' in st.session_state:
+        del st.session_state.acciones_partido
+    
+    if 'evaluacion_temporal' in st.session_state:
+        del st.session_state.evaluacion_temporal
+    
+    if 'minuto_actual' in st.session_state:
+        del st.session_state.minuto_actual
+
+# ================================
 # ESTADO DE LA APLICACIÓN
 # ================================
 
@@ -432,8 +854,12 @@ if 'modo_evaluacion' not in st.session_state:
 if 'alineaciones_buscadas' not in st.session_state:
     st.session_state.alineaciones_buscadas = False
 
+# IMPORTANTE: Estado para la fecha seleccionada
+if 'fecha_seleccionada' not in st.session_state:
+    st.session_state.fecha_seleccionada = date.today()
+
 # ================================
-# VISTA: LISTA DE PARTIDOS LIMPIA (mantener igual)
+# VISTA: LISTA DE PARTIDOS LIMPIA - CORREGIDA PARA CAMBIO DE FECHA
 # ================================
 
 if st.session_state.modo_vista == 'lista_partidos':
@@ -445,20 +871,29 @@ if st.session_state.modo_vista == 'lista_partidos':
         st.subheader("🗓️ Partidos")
     
     with col2:
-        fecha_seleccionada = st.date_input(
+        # IMPORTANTE: Usar key único para el date_input
+        nueva_fecha = st.date_input(
             "Fecha:",
-            value=date.today(),
+            value=st.session_state.fecha_seleccionada,
             min_value=date.today() - timedelta(days=7),
-            max_value=date.today() + timedelta(days=14)
+            max_value=date.today() + timedelta(days=14),
+            key="selector_fecha_partidos"
         )
+        
+        # Si la fecha cambió, actualizar el estado
+        if nueva_fecha != st.session_state.fecha_seleccionada:
+            st.session_state.fecha_seleccionada = nueva_fecha
+            st.rerun()
     
     with col3:
         if st.button("🔄 Actualizar", use_container_width=True):
+            # Forzar recarga
+            st.cache_data.clear()
             st.rerun()
     
-    # Cargar partidos LIMPIO
+    # Cargar partidos LIMPIO - SIEMPRE usar la fecha del session state
     with st.spinner("🔄 Cargando partidos..."):
-        fecha_str = fecha_seleccionada.strftime('%Y-%m-%d')
+        fecha_str = st.session_state.fecha_seleccionada.strftime('%Y-%m-%d')
         partidos = cargar_partidos_limpio(fecha_str)
     
     # Estadísticas rápidas
@@ -481,7 +916,7 @@ if st.session_state.modo_vista == 'lista_partidos':
         st.markdown("---")
         
         # Lista de partidos LIMPIA
-        st.subheader(f"🏟️ {fecha_seleccionada.strftime('%d/%m/%Y')}")
+        st.subheader(f"🏟️ {st.session_state.fecha_seleccionada.strftime('%d/%m/%Y')}")
         
         for partido in partidos:
             # Determinar estado LIMPIO
@@ -560,8 +995,9 @@ if st.session_state.modo_vista == 'lista_partidos':
             st.markdown("---")
     
     else:
-        st.info(f"📅 No hay partidos para el {fecha_seleccionada.strftime('%d/%m/%Y')}")
+        st.info(f"📅 No hay partidos para el {st.session_state.fecha_seleccionada.strftime('%d/%m/%Y')}")
 
+# [Resto del código permanece igual desde la vista de observación...]
 # ================================
 # VISTA: OBSERVACIÓN ACTIVA - CORREGIDA
 # ================================
@@ -889,22 +1325,11 @@ elif st.session_state.modo_vista == 'observacion':
             st.warning("⚠️ Partido sin ID de BeSoccer - Las alineaciones pueden no estar disponibles")
     
     # ================================
-    # FORMULARIO DE EVALUACIÓN (mantener igual)
+    # FORMULARIO DE EVALUACIÓN
     # ================================
     
     if st.session_state.jugador_evaluando:
         player = st.session_state.jugador_evaluando
-        
-        st.markdown('<div class="eval-form">', unsafe_allow_html=True)
-        
-        # Header del jugador seleccionado
-        st.markdown(f"""
-        <div class="jugador-seleccionado">
-            <h3>📝 Evaluando: {player['nombre']}</h3>
-            <p>{player['equipo']} • {player['posicion']} • #{player['numero']}</p>
-            {f"<p>🎯 Jugador Objetivo</p>" if player['es_objetivo'] else ""}
-        </div>
-        """, unsafe_allow_html=True)
         
         # Selector de modo de evaluación
         col_mode1, col_mode2, col_mode3 = st.columns([1, 1, 1])
@@ -926,52 +1351,26 @@ elif st.session_state.modo_vista == 'observacion':
                 st.session_state.jugador_evaluando = None
                 st.rerun()
         
-        # FORMULARIO SEGÚN MODO (mantener igual)
-        with st.form("evaluacion_jugador", clear_on_submit=False):
+        # LLAMAR A LA FUNCIÓN CORRESPONDIENTE SEGÚN EL MODO
+        if st.session_state.modo_evaluacion == 'campo':
+            mostrar_formulario_evaluacion_campo(player, st.session_state.partido_activo)
+        else:
+            # MODO COMPLETO - Mantener el formulario actual por ahora
+            st.markdown('<div class="eval-form">', unsafe_allow_html=True)
             
-            if st.session_state.modo_evaluacion == 'campo':
-                st.markdown("#### 🏟️ Evaluación Rápida en Campo")
-                st.info("💡 Ideal para observación en vivo - Solo aspectos esenciales")
-                
-                col_eval1, col_eval2 = st.columns(2)
-                
-                with col_eval1:
-                    nota_general = st.slider("🌟 Nota General", 1, 10, 5, help="Evaluación global del rendimiento")
-                    
-                    # Aspectos principales según posición
-                    if 'portero' in player['posicion'].lower():
-                        aspecto1 = st.slider("🥅 Paradas/Reflejos", 1, 10, 5)
-                        aspecto2 = st.slider("🦶 Juego con pies", 1, 10, 5)
-                        aspecto3 = st.slider("📢 Comunicación", 1, 10, 5)
-                    elif 'defensa' in player['posicion'].lower():
-                        aspecto1 = st.slider("🛡️ Marcaje/Duelos", 1, 10, 5)
-                        aspecto2 = st.slider("⚽ Pase/Salida balón", 1, 10, 5)
-                        aspecto3 = st.slider("🧠 Posicionamiento", 1, 10, 5)
-                    elif 'medio' in player['posicion'].lower():
-                        aspecto1 = st.slider("⚽ Pase/Distribución", 1, 10, 5)
-                        aspecto2 = st.slider("🧠 Visión de juego", 1, 10, 5)
-                        aspecto3 = st.slider("💪 Físico/Duelos", 1, 10, 5)
-                    else:  # Delantero
-                        aspecto1 = st.slider("🎯 Finalización", 1, 10, 5)
-                        aspecto2 = st.slider("🏃 Desmarque/Movilidad", 1, 10, 5)
-                        aspecto3 = st.slider("⚽ Técnica/Primer toque", 1, 10, 5)
-                
-                with col_eval2:
-                    potencial = st.selectbox("📈 Potencial", ["Bajo", "Medio", "Alto", "Muy Alto"], index=1)
-                    recomendacion = st.selectbox("💼 Recomendación", 
-                                               ["Descartar", "Seguir observando", "Interés moderado", "Contratar"], 
-                                               index=1)
-                    minutos_jugados = st.number_input("⚽ Minutos jugados", min_value=1, max_value=120, value=45)
-                
-                # Campo de observaciones amplio
-                observaciones = st.text_area("💭 Observaciones", 
-                                           placeholder="Acciones destacadas, fortalezas observadas, debilidades detectadas...",
-                                           height=120)
+            # Header del jugador seleccionado
+            st.markdown(f"""
+            <div class="jugador-seleccionado">
+                <h3>📝 Evaluando: {player['nombre']}</h3>
+                <p>{player['equipo']} • {player['posicion']} • #{player['numero']}</p>
+                {f"<p>🎯 Jugador Objetivo</p>" if player['es_objetivo'] else ""}
+            </div>
+            """, unsafe_allow_html=True)
             
-            else:  # Modo completo (mantener igual)
-                st.markdown("#### 🎥 Evaluación Completa")
-                st.info("💡 Para análisis posterior detallado")
-                
+            st.markdown("#### 🎥 Evaluación Completa")
+            st.info("💡 Para análisis posterior detallado")
+            
+            with st.form("evaluacion_jugador_completo", clear_on_submit=False):
                 nota_general = st.slider("🌟 Nota General", 1, 10, 5)
                 potencial = st.selectbox("📈 Potencial", ["Bajo", "Medio", "Alto", "Muy Alto"], index=1)
                 recomendacion = st.selectbox("💼 Recomendación", 
@@ -982,49 +1381,46 @@ elif st.session_state.modo_vista == 'observacion':
                                            placeholder="Análisis completo del rendimiento...",
                                            height=100)
                 
-                # Para modo completo, usar valores por defecto
-                aspecto1 = aspecto2 = aspecto3 = 5
+                # Botones de envío
+                col_submit1, col_submit2 = st.columns(2)
+                
+                with col_submit1:
+                    submitted = st.form_submit_button("💾 Guardar Informe", use_container_width=True, type="primary")
+                
+                with col_submit2:
+                    continuar = st.form_submit_button("➡️ Guardar y Continuar", use_container_width=True)
             
-            # Botones de envío
-            col_submit1, col_submit2 = st.columns(2)
+            # Procesar envío del formulario
+            if submitted or continuar:
+                try:
+                    informe_data = {
+                        'partido_id': player['partido_id'],
+                        'jugador_nombre': player['nombre'],
+                        'equipo': player['equipo'],
+                        'posicion': player['posicion'],
+                        'scout_usuario': current_user['usuario'],
+                        'nota_general': nota_general,
+                        'potencial': potencial.lower(),
+                        'recomendacion': recomendacion.lower().replace(' ', '_'),
+                        'observaciones': observaciones,
+                        'minutos_observados': minutos_jugados,
+                        'fortalezas': f"Evaluación completa. Nota: {nota_general}/10",
+                        'debilidades': f"Por determinar en análisis detallado"
+                    }
+                    
+                    informe_id = partido_model.crear_informe_scouting(informe_data)
+                    
+                    st.success(f"✅ **Informe guardado exitosamente!** (ID: {informe_id})")
+                    st.success(f"🎯 **Jugador:** {player['nombre']} | **Nota:** {nota_general}/10 | **Recomendación:** {recomendacion}")
+                    
+                    if continuar:
+                        st.session_state.jugador_evaluando = None
+                        st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Error al guardar el informe: {str(e)}")
             
-            with col_submit1:
-                submitted = st.form_submit_button("💾 Guardar Informe", use_container_width=True, type="primary")
-            
-            with col_submit2:
-                continuar = st.form_submit_button("➡️ Guardar y Continuar", use_container_width=True)
-        
-        # Procesar envío del formulario (mantener igual)
-        if submitted or continuar:
-            try:
-                informe_data = {
-                    'partido_id': player['partido_id'],
-                    'jugador_nombre': player['nombre'],
-                    'equipo': player['equipo'],
-                    'posicion': player['posicion'],
-                    'scout_usuario': current_user['usuario'],
-                    'nota_general': nota_general,
-                    'potencial': potencial.lower(),
-                    'recomendacion': recomendacion.lower().replace(' ', '_'),
-                    'observaciones': observaciones,
-                    'minutos_observados': minutos_jugados,
-                    'fortalezas': f"Evaluación {st.session_state.modo_evaluacion}. Aspectos: {aspecto1}/10, {aspecto2}/10, {aspecto3}/10",
-                    'debilidades': f"Modo: {st.session_state.modo_evaluacion}. {observaciones[:100] if observaciones else 'Sin observaciones adicionales'}"
-                }
-                
-                informe_id = partido_model.crear_informe_scouting(informe_data)
-                
-                st.success(f"✅ **Informe guardado exitosamente!** (ID: {informe_id})")
-                st.success(f"🎯 **Jugador:** {player['nombre']} | **Nota:** {nota_general}/10 | **Recomendación:** {recomendacion}")
-                
-                if continuar:
-                    st.session_state.jugador_evaluando = None
-                    st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Error al guardar el informe: {str(e)}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 # ================================
 # SIDEBAR (simplificado)

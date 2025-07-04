@@ -1,3 +1,5 @@
+# common/login.py - VERSIÓN COMPLETA MEJORADA
+
 import streamlit as st
 import hashlib
 import sqlite3
@@ -69,15 +71,36 @@ class LoginManager:
         ''', (usuario, password_hash))
         
         resultado = cursor.fetchone()
+        
+        # Actualizar último acceso
+        if resultado:
+            cursor.execute('''
+                UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP
+                WHERE usuario = ?
+            ''', (usuario,))
+            conn.commit()
+        
         conn.close()
         
         if resultado:
-            return {
+            # IMPORTANTE: Guardar en AMBOS formatos para máxima compatibilidad
+            # Formato 1: Campos individuales (para partido_model.py)
+            st.session_state.authenticated = True
+            st.session_state.usuario = usuario
+            st.session_state.nombre = resultado[1]
+            st.session_state.rol = resultado[2]
+            st.session_state.user_id = resultado[0]
+            
+            # Formato 2: Diccionario user_data (para mantener compatibilidad)
+            user_data = {
                 'id': resultado[0],
                 'nombre': resultado[1],
                 'rol': resultado[2],
                 'usuario': usuario
             }
+            st.session_state.user_data = user_data
+            
+            return user_data
         return None
     
     def mostrar_login(self):
@@ -101,9 +124,6 @@ class LoginManager:
             if usuario and password:
                 user_data = self.verificar_credenciales(usuario, password)
                 if user_data:
-                    # Guardar en session_state
-                    st.session_state.authenticated = True
-                    st.session_state.user_data = user_data
                     st.success(f"¡Bienvenido/a, {user_data['nombre']}!")
                     st.rerun()
                 else:
@@ -121,8 +141,11 @@ class LoginManager:
     
     def logout(self):
         """Cierra la sesión del usuario"""
-        st.session_state.authenticated = False
-        st.session_state.user_data = None
+        # Limpiar TODOS los datos de sesión
+        keys_to_remove = ['authenticated', 'user_data', 'usuario', 'nombre', 'rol', 'user_id']
+        for key in keys_to_remove:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
     
     def is_authenticated(self):
@@ -130,5 +153,39 @@ class LoginManager:
         return st.session_state.get('authenticated', False)
     
     def get_current_user(self):
-        """Obtiene los datos del usuario actual"""
-        return st.session_state.get('user_data', None)
+        """Obtiene los datos del usuario actual - COMPATIBLE CON AMBOS FORMATOS"""
+        if st.session_state.get('authenticated', False):
+            # Intentar primero con user_data (formato nuevo)
+            if 'user_data' in st.session_state and st.session_state.user_data:
+                return st.session_state.user_data
+            # Si no, construir desde campos individuales (formato antiguo)
+            elif 'usuario' in st.session_state:
+                return {
+                    'id': st.session_state.get('user_id', 0),
+                    'usuario': st.session_state.usuario,
+                    'nombre': st.session_state.nombre,
+                    'rol': st.session_state.rol
+                }
+        return None
+    
+    def get_user_role(self):
+        """Obtiene el rol del usuario actual"""
+        user = self.get_current_user()
+        return user['rol'] if user else None
+    
+    def is_admin(self):
+        """Verifica si el usuario actual es administrador"""
+        return self.get_user_role() == 'admin'
+    
+    def require_auth(self):
+        """Decorator para requerir autenticación en páginas"""
+        if not self.is_authenticated():
+            st.error("🔒 Debes iniciar sesión para acceder a esta página")
+            st.stop()
+    
+    def require_admin(self):
+        """Decorator para requerir rol de administrador"""
+        self.require_auth()
+        if not self.is_admin():
+            st.error("🔒 Esta página requiere permisos de administrador")
+            st.stop()

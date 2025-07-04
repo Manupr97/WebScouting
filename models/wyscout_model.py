@@ -4,27 +4,21 @@ from pathlib import Path
 import os
 import time
 
-class WyscoutModel:
-    # AÑADIR ESTAS VARIABLES DE CLASE
-    _instance = None
-    _data_cache = None
-    _cache_timestamp = None
-    _cache_duration = 3600  # 1 hora
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self):
-        # Tu código existente sigue igual
-        self.data_path = Path("data/wyscout_LaLiga_limpio.xlsx")
-        self._df = None
-        self._column_mapping = {}
-        self._detected_columns = {}
+# FUNCIÓN GLOBAL PARA CACHE DE STREAMLIT
+@st.cache_data(ttl=3600)
+def cargar_datos_wyscout(data_path):
+    """Carga los datos del archivo XLSX - CACHEADO POR STREAMLIT"""
+    try:
+        if not os.path.exists(data_path):
+            return pd.DataFrame(), {}
         
-    def _detect_columns(self, df):
-        """Detecta automáticamente los nombres de las columnas importantes"""
+        # Cargar el archivo XLSX
+        df = pd.read_excel(data_path)
+        
+        # Limpiar nombres de columnas
+        df.columns = df.columns.str.strip()
+        
+        # Detectar columnas automáticamente
         column_patterns = {
             'player': ['player', 'name', 'nombre', 'jugador', 'full name', 'apellidos'],
             'team': ['team', 'club', 'equipo', 'squad'],
@@ -48,50 +42,46 @@ class WyscoutModel:
                 if key in detected:
                     break
         
-        return detected
-    
-    @st.cache_data
-    def load_data(_self):
-        """Carga los datos del archivo XLSX con detección automática de columnas - OPTIMIZADO"""
-        # Verificar cache de clase primero
-        if WyscoutModel._data_cache is not None and WyscoutModel._cache_timestamp:
-            if time.time() - WyscoutModel._cache_timestamp < _self._cache_duration:
-                # Cache válido, retornar datos cacheados
-                return WyscoutModel._data_cache.copy(), _self._detected_columns
+        return df, detected
         
-        try:
-            if not _self.data_path.exists():
-                return pd.DataFrame(), {}
-            
-            # Cargar el archivo XLSX silenciosamente
-            df = pd.read_excel(_self.data_path)
-            
-            # Limpiar nombres de columnas
-            df.columns = df.columns.str.strip()
-            
-            # Detectar columnas automáticamente
-            detected_columns = _self._detect_columns(df)
-            
-            # GUARDAR EN CACHE DE CLASE
-            WyscoutModel._data_cache = df
-            WyscoutModel._cache_timestamp = time.time()
-            
-            return df, detected_columns
-            
-        except Exception as e:
-            st.error(f"❌ Error al cargar el archivo: {str(e)}")
-            return pd.DataFrame(), {}
+    except Exception as e:
+        st.error(f"❌ Error al cargar el archivo: {str(e)}")
+        return pd.DataFrame(), {}
+
+class WyscoutModel:
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # Solo inicializar una vez
+        if not WyscoutModel._initialized:
+            self.data_path = Path("data/wyscout_LaLiga_limpio.xlsx")
+            self._df = None
+            self._detected_columns = {}
+            self._column_mapping = {}
+            WyscoutModel._initialized = True
+    
+    def load_data(self):
+        """Carga los datos usando la función cacheada global"""
+        # ESTO ES LO IMPORTANTE: Usar la función global cacheada
+        self._df, self._detected_columns = cargar_datos_wyscout(str(self.data_path))
+        return self._df, self._detected_columns
     
     def get_all_players(self):
-        """Obtiene todos los jugadores"""
-        if self._df is None:
-            self._df, self._detected_columns = self.load_data()
+        """Obtiene todos los jugadores - con cache automático"""
+        if self._df is None or self._df.empty:
+            self.load_data()
         return self._df
     
     def get_detected_columns(self):
         """Obtiene el mapeo de columnas detectadas"""
         if not self._detected_columns:
-            self.get_all_players()  # Esto carga los datos y detecta columnas
+            self.load_data()
         return self._detected_columns
     
     def get_column_name(self, standard_name):

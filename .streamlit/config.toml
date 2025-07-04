@@ -1,51 +1,62 @@
-[theme]
-primaryColor = "#24282a"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-font = "sans serif"
-
 [server]
-# Puerto por defecto
+# Puerto donde correrá la aplicación
 port = 8501
 
-# Configuración de memoria
-maxCachedMessageSize = 200
+# Habilitar CORS (necesario si enableXsrfProtection está activo)
+enableCORS = true
 
-# WebSocket
-enableWebsocketCompression = true
-
-# CORS
-enableCORS = false
-
-# Xsrf
+# Protección XSRF
 enableXsrfProtection = true
 
+# Ejecutar en modo headless (sin abrir navegador)
+headless = false
+
+# Dirección donde se ejecuta
+address = "localhost"
+
 [browser]
-# No recopilar estadísticas de uso
+# Recopilar estadísticas de uso
 gatherUsageStats = false
 
-# Cache del servidor
+# Abrir navegador automáticamente
 serverAddress = "localhost"
-serverPort = 8501
 
-[runner]
-# Magia rápida deshabilitada para mejor rendimiento
-magicEnabled = false
+[theme]
+# Color principal (botones, links)
+primaryColor = "#007bff"
 
-# Reruns rápidos
-fastReruns = true
+# Color de fondo principal
+backgroundColor = "#FFFFFF"
 
-# Instalación de paquetes
-installTracker = false
+# Color de fondo secundario (sidebar)
+secondaryBackgroundColor = "#f8f9fa"
 
-[logger]
-# Nivel de log (cambiar a "warning" en producción)
-level = "info"
+# Color del texto
+textColor = "#24282a"
+
+# Fuente (opciones: "sans serif", "serif", "monospace")
+font = "sans serif"
 
 [client]
-# Mostrar errores
+# Mostrar detalles de errores
 showErrorDetails = true
 
-# Herramientas de desarrollo
+# Mostrar barra de herramientas
 toolbarMode = "auto"
+
+# Mostrar sidebar por defecto
+showSidebarNavigation = true
+
+[runner]
+# Habilitar magic commands (%%, !)
+magicEnabled = true
+
+# Instalar watchdog para auto-reload
+fastReruns = true
+
+[logger]
+# Nivel de log
+level = "info"
+
+# Format de mensajes
+messageFormat = "%(asctime)s %(message)s"

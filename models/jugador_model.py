@@ -1,4 +1,4 @@
-# models/jugador_model.py - VERSIÓN COMPATIBLE CON BD ACTUAL
+# models/jugador_model.py - VERSIÓN CON SINGLETON Y CACHE
 
 import sqlite3
 import pandas as pd
@@ -8,98 +8,116 @@ import random
 from fuzzywuzzy import fuzz, process
 import logging
 import time
+import streamlit as st
 
 # Configurar logging para debug
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# FUNCIÓN GLOBAL CACHEADA PARA STREAMLIT
+@st.cache_data(ttl=3600)
+def cargar_wyscout_global(wyscout_path):
+    """Carga datos de Wyscout - CACHEADO POR STREAMLIT"""
+    try:
+        if not os.path.exists(wyscout_path):
+            logging.error(f"❌ Archivo no encontrado: {wyscout_path}")
+            return pd.DataFrame()
+        
+        logging.info("📂 Cargando Wyscout desde archivo...")
+        start_time = time.time()
+        
+        # Cargar Excel
+        df = pd.read_excel(wyscout_path, engine='openpyxl')
+        
+        load_time = time.time() - start_time
+        logging.info(f"✅ Wyscout cargado: {len(df)} jugadores en {load_time:.2f}s")
+        
+        return df
+        
+    except Exception as e:
+        logging.error(f"❌ Error cargando Wyscout: {str(e)}")
+        return pd.DataFrame()
+
 class JugadorModel:
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, db_path="data/jugadores.db", wyscout_path="data/wyscout_LaLiga_limpio.xlsx"):
+        # Solo inicializar una vez
+        if JugadorModel._initialized:
+            return
+            
         self.db_path = db_path
         self.wyscout_path = wyscout_path
-        self.wyscout_data = None  # Cache para evitar recargar
         self._wyscout_cache = None
-        self._wyscout_cache_time = None
-        self._cache_duration = 3600  # 1 hora en segundos
         
-        # Inicializar base de datos primero
+        # MAPEO DE COLUMNAS (guardarlo como atributo de instancia)
+        self.column_mapping = {
+            'nombre': 'jugador',
+            'equipo': 'equipo_durante_el_período_seleccionado',
+            'posicion': 'pos_principal',
+            'posicion_secundaria': 'pos_secundaria',
+            'edad': 'edad',
+            'fecha_nacimiento': 'fecha_nac',
+            'altura': 'altura',
+            'peso': 'peso',
+            'valor_mercado': 'valor_de_mercado_(transfermarkt)',
+            'pais': 'país_de_nacimiento',
+            'pasaporte': 'pasaporte',
+            'pie_preferido': 'pie',
+            'contrato_hasta': 'vencimiento_contrato',
+            'en_prestamo': 'en_prestamo',
+            
+            # Estadísticas básicas
+            'partidos_jugados': 'partidos_jugados',
+            'minutos': 'min',
+            'goles': 'goles',
+            'asistencias': 'asistencias',
+            'tarjetas_amarillas': 'tarjetas_amarillas',
+            'tarjetas_rojas': 'tarjetas_rojas',
+            
+            # Estadísticas avanzadas
+            'xg': 'xg',
+            'xa': 'xa',
+            'remates': 'remates',
+            'duelos_ganados_pct': '%duelos_ganados,_',
+            'precision_pases_pct': '%precisión_pases,_',
+            'regates_realizados_pct': '%regates_realizados,_',
+            'duelos_aereos_pct': '%duelos_aéreos_ganados,_'
+        }
+        
+        # Guardar referencias a columnas clave
+        self.name_column = self.column_mapping['nombre']
+        self.team_column = self.column_mapping['equipo']
+        self.position_column = self.column_mapping['posicion']
+        
+        # Inicializar base de datos
         self.init_database()
         
-        # Cargar datos de Wyscout
-        self.wyscout_data = self._load_wyscout_data()
+        JugadorModel._initialized = True
+        logger.info("✅ JugadorModel inicializado (Singleton)")
     
     def _load_wyscout_data(self):
-        """Carga datos de Wyscout desde archivo Excel"""
-        try:
-            wyscout_path = 'data/wyscout_LaLiga_limpio.xlsx'
-            
-            if not os.path.exists(wyscout_path):
-                logging.error(f"❌ Archivo no encontrado: {wyscout_path}")
-                return pd.DataFrame()
-            
-            logging.info("📂 Cargando Wyscout desde archivo...")
-            start_time = time.time()
-            
-            # Cargar Excel
-            df = pd.read_excel(wyscout_path, engine='openpyxl')
-            
-            # APLICAR TU MAPEO DE COLUMNAS COMPLETO
-            self.column_mapping = {
-                'nombre': 'jugador',
-                'equipo': 'equipo_durante_el_período_seleccionado',
-                'posicion': 'pos_principal',
-                'posicion_secundaria': 'pos_secundaria',
-                'edad': 'edad',
-                'fecha_nacimiento': 'fecha_nac',
-                'altura': 'altura',
-                'peso': 'peso',
-                'valor_mercado': 'valor_de_mercado_(transfermarkt)',
-                'pais': 'país_de_nacimiento',
-                'pasaporte': 'pasaporte',
-                'pie_preferido': 'pie',
-                'contrato_hasta': 'vencimiento_contrato',
-                'en_prestamo': 'en_prestamo',
-                
-                # Estadísticas básicas
-                'partidos_jugados': 'partidos_jugados',
-                'minutos': 'min',
-                'goles': 'goles',
-                'asistencias': 'asistencias',
-                'tarjetas_amarillas': 'tarjetas_amarillas',
-                'tarjetas_rojas': 'tarjetas_rojas',
-                
-                # Estadísticas avanzadas
-                'xg': 'xg',
-                'xa': 'xa',
-                'remates': 'remates',
-                'duelos_ganados_pct': '%duelos_ganados,_',
-                'precision_pases_pct': '%precisión_pases,_',
-                'regates_realizados_pct': '%regates_realizados,_',
-                'duelos_aereos_pct': '%duelos_aéreos_ganados,_'
-            }
-            
-            # Guardar referencias a columnas clave
-            self.name_column = self.column_mapping['nombre']
-            self.team_column = self.column_mapping['equipo']
-            self.position_column = self.column_mapping['posicion']
-            
-            # Guardar en cache
-            self._wyscout_cache = df
-            self._wyscout_cache_time = time.time()
-            
-            load_time = time.time() - start_time
-            logging.info(f"✅ Wyscout cargado: {len(df)} jugadores en {load_time:.2f}s")
-            
-            # Solo debug si está activado
-            if logging.getLogger().isEnabledFor(logging.DEBUG):
-                logging.debug("📋 Mapeo corregido aplicado exitosamente")
-                logging.debug(f"🎯 Columnas clave: nombre='{self.name_column}', equipo='{self.team_column}', posicion='{self.position_column}'")
-            
-            return df.copy()
-            
-        except Exception as e:
-            logging.error(f"❌ Error cargando Wyscout: {str(e)}")
-            return pd.DataFrame()
+        """Carga datos de Wyscout usando cache global"""
+        # Usar la función global cacheada
+        return cargar_wyscout_global(self.wyscout_path)
+    
+    @property
+    def wyscout_data(self):
+        """Lazy loading de datos Wyscout"""
+        if self._wyscout_cache is None:
+            self._wyscout_cache = self._load_wyscout_data()
+        return self._wyscout_cache
+    
+    @wyscout_data.setter
+    def wyscout_data(self, value):
+        """Setter para wyscout_data"""
+        self._wyscout_cache = value
     
     def debug_column_mapping(self):
         """🔍 Función de debug para verificar el mapeo"""
@@ -476,6 +494,38 @@ class JugadorModel:
     
     # === MÉTODOS EXISTENTES (mantener todos) ===
     
+    def obtener_jugadores_observados_con_informes(self):
+        """
+        Obtiene SOLO jugadores que tienen informes reales asociados
+        """
+        conn = sqlite3.connect(self.db_path)
+        
+        # Query que une jugadores con informes para asegurar que solo mostramos 
+        # jugadores con informes reales
+        df = pd.read_sql_query('''
+            SELECT DISTINCT j.*, 
+                COUNT(DISTINCT i.id) as total_informes,
+                MAX(i.fecha_creacion) as ultimo_informe,
+                AVG(i.nota_general) as nota_promedio,
+                CASE 
+                    WHEN j.veces_observado = 1 THEN 'Nuevo'
+                    WHEN j.veces_observado <= 3 THEN 'Seguimiento'
+                    ELSE 'Objetivo'
+                END as estado_observacion
+            FROM jugadores j
+            INNER JOIN informes_scouting i ON (
+                LOWER(TRIM(j.nombre_completo)) = LOWER(TRIM(i.jugador_nombre))
+                AND LOWER(TRIM(j.equipo)) = LOWER(TRIM(i.equipo))
+            )
+            GROUP BY j.id
+            ORDER BY ultimo_informe DESC
+        ''', conn)
+        
+        conn.close()
+        
+        logger.info(f"📊 Obtenidos {len(df)} jugadores con informes reales")
+        return df
+    
     def obtener_jugadores_observados(self):
         """Obtiene todos los jugadores observados por el scout"""
         conn = sqlite3.connect(self.db_path)
@@ -646,20 +696,11 @@ class JugadorModel:
     def get_all_wyscout_players(self):
         """
         Obtiene todos los jugadores de Wyscout con cache inteligente
-        NO recarga si ya está en memoria
         """
-        # Verificar cache
-        if self._wyscout_cache is not None:
-            if self._wyscout_cache_time and (time.time() - self._wyscout_cache_time) < self._cache_duration:
-                # Cache válido, retornar copia
-                logging.debug("📦 Usando cache de Wyscout")
-                return self._wyscout_cache.copy()
-        
-        # Cache inválido o no existe, cargar datos
-        return self._load_wyscout_data()
+        return self.wyscout_data.copy() if self.wyscout_data is not None else pd.DataFrame()
     
     def clear_wyscout_cache(self):
         """Limpia el cache de Wyscout (para admin)"""
+        st.cache_data.clear()
         self._wyscout_cache = None
-        self._wyscout_cache_time = None
         logging.info("🗑️ Cache de Wyscout limpiado")

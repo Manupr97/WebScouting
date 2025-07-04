@@ -12,12 +12,27 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PartidoModel:
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, db_path="data/partidos.db"):
+        # Solo inicializar una vez
+        if PartidoModel._initialized:
+            return
+            
         self.db_path = db_path
         self.init_database()
         
         # Inicializar modelo de jugadores para integración automática
         self.jugador_model = JugadorModel()
+        
+        PartidoModel._initialized = True
+        logger.info("✅ PartidoModel inicializado (Singleton)")
     
     def init_database(self):
         """Inicializa las tablas de partidos e informes"""
@@ -111,10 +126,9 @@ class PartidoModel:
         
         conn.commit()
         conn.close()
-        
-        # Crear datos mock si no existen partidos
-        self.crear_partidos_mock()
     
+    # REEMPLAZAR TODO el método crear_informe_scouting en partido_model.py con esto:
+
     def crear_informe_scouting(self, informe_data):
         """
         Crea un nuevo informe de scouting con INTEGRACIÓN AUTOMÁTICA a Wyscout
@@ -195,7 +209,7 @@ class PartidoModel:
             )
             
             if resultado_busqueda:
-                # 3. AÑADIR JUGADOR A BD PERSONAL
+                # 3A. JUGADOR ENCONTRADO EN WYSCOUT
                 jugador_bd_id = self.jugador_model.añadir_jugador_observado(
                     datos_wyscout=resultado_busqueda['datos_jugador'],
                     confianza=resultado_busqueda['confianza'],
@@ -203,7 +217,7 @@ class PartidoModel:
                     informe_id=informe_id
                 )
                 
-                # 4. ACTUALIZAR INFORME CON DATOS DE WYSCOUT
+                # Actualizar informe con datos de Wyscout
                 cursor.execute('''
                     UPDATE informes_scouting SET 
                         jugador_bd_id = ?,
@@ -221,20 +235,53 @@ class PartidoModel:
                 conn.commit()
                 
                 logger.info(f"🎯 ÉXITO TOTAL: Jugador añadido a BD personal (ID: {jugador_bd_id}) "
-                           f"con {resultado_busqueda['confianza']:.1f}% confianza")
+                        f"con {resultado_busqueda['confianza']:.1f}% confianza")
                 
             else:
-                # Marcar como procesado pero sin match
+                # 3B. JUGADOR NO ENCONTRADO EN WYSCOUT - AÑADIR MANUALMENTE
+                logger.warning(f"⚠️ Jugador no encontrado en Wyscout: {informe_data['jugador_nombre']} ({informe_data['equipo']})")
+                
+                # Crear datos básicos del jugador para BD personal
+                datos_jugador_manual = {
+                    self.jugador_model.column_mapping['nombre']: informe_data['jugador_nombre'],
+                    self.jugador_model.column_mapping['equipo']: informe_data['equipo'],
+                    self.jugador_model.column_mapping['posicion']: informe_data.get('posicion', 'N/A'),
+                    self.jugador_model.column_mapping['edad']: None,
+                    # Añadir otros campos vacíos necesarios
+                    self.jugador_model.column_mapping['pais']: '',
+                    self.jugador_model.column_mapping['altura']: None,
+                    self.jugador_model.column_mapping['peso']: None,
+                    self.jugador_model.column_mapping['pie_preferido']: '',
+                    self.jugador_model.column_mapping['valor_mercado']: None,
+                    self.jugador_model.column_mapping['partidos_jugados']: 0,
+                    self.jugador_model.column_mapping['minutos']: 0,
+                    self.jugador_model.column_mapping['goles']: 0,
+                    self.jugador_model.column_mapping['asistencias']: 0,
+                    self.jugador_model.column_mapping['tarjetas_amarillas']: 0,
+                    self.jugador_model.column_mapping['tarjetas_rojas']: 0
+                }
+                
+                # Añadir jugador a BD personal con datos manuales
+                jugador_bd_id = self.jugador_model.añadir_jugador_observado(
+                    datos_wyscout=datos_jugador_manual,
+                    confianza=0,  # 0% porque no se encontró en Wyscout
+                    algoritmo='manual_informe',
+                    informe_id=informe_id
+                )
+                
+                # Actualizar informe con el ID del jugador manual
                 cursor.execute('''
                     UPDATE informes_scouting SET 
+                        jugador_bd_id = ?,
                         procesado_wyscout = 1,
-                        wyscout_match_confianza = 0
+                        wyscout_match_confianza = 0,
+                        wyscout_algoritmo = 'manual_no_encontrado'
                     WHERE id = ?
-                ''', (informe_id,))
+                ''', (jugador_bd_id, informe_id))
                 
                 conn.commit()
                 
-                logger.warning(f"⚠️ Jugador no encontrado en Wyscout: {informe_data['jugador_nombre']} ({informe_data['equipo']})")
+                logger.info(f"✅ Jugador añadido manualmente a BD personal (ID: {jugador_bd_id})")
                 
         except Exception as e:
             logger.error(f"❌ Error en búsqueda automática: {str(e)}")
@@ -259,22 +306,26 @@ class PartidoModel:
         
         cursor.execute('''
             SELECT i.*, p.equipo_local, p.equipo_visitante, p.fecha,
-                   CASE 
-                       WHEN i.wyscout_match_confianza >= 90 THEN '🟢 Excelente'
-                       WHEN i.wyscout_match_confianza >= 80 THEN '🟡 Buena'
-                       WHEN i.wyscout_match_confianza >= 70 THEN '🟠 Aceptable'
-                       WHEN i.wyscout_match_confianza = 0 THEN '🔴 No encontrado'
-                       WHEN i.wyscout_match_confianza = -1 THEN '⚫ Error'
-                       ELSE '⚪ Sin procesar'
-                   END as estado_wyscout
+                CASE 
+                    WHEN i.wyscout_match_confianza >= 90 THEN '🟢 Excelente'
+                    WHEN i.wyscout_match_confianza >= 80 THEN '🟡 Buena'
+                    WHEN i.wyscout_match_confianza >= 70 THEN '🟠 Aceptable'
+                    WHEN i.wyscout_match_confianza = 0 THEN '🔴 No encontrado'
+                    WHEN i.wyscout_match_confianza = -1 THEN '⚫ Error'
+                    ELSE '⚪ Sin procesar'
+                END as estado_wyscout
             FROM informes_scouting i
             JOIN partidos p ON i.partido_id = p.id
             WHERE i.scout_usuario = ?
             ORDER BY i.fecha_creacion DESC
         ''', (usuario,))
         
+        # IMPORTANTE: Devolver como lista de tuplas para compatibilidad
         informes = cursor.fetchall()
+        
         conn.close()
+        
+        logger.info(f"📊 Obtenidos {len(informes)} informes para usuario {usuario}")
         return informes
     
     def obtener_estadisticas_integracion(self):
@@ -382,101 +433,6 @@ class PartidoModel:
         logger.info(f"✅ Reprocesamiento completado: {exitosos}/{len(informes_pendientes)} exitosos")
         return exitosos, len(informes_pendientes)
     
-    def crear_partidos_mock(self):
-        """Crea partidos de ejemplo para testing"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Verificar si ya hay partidos
-        cursor.execute("SELECT COUNT(*) FROM partidos")
-        if cursor.fetchone()[0] > 0:
-            conn.close()
-            return
-        
-        # ... (mantener todo el código de partidos_mock exactamente igual)
-        # Partidos mock para diferentes fechas
-        partidos_mock = [
-            {
-                "id": "laliga_2025_001",
-                "fecha": "2025-05-30",
-                "liga": "LaLiga EA Sports",
-                "equipo_local": "Real Madrid",
-                "equipo_visitante": "FC Barcelona",
-                "estadio": "Santiago Bernabéu",
-                "hora": "21:00",
-                "estado": "en_vivo",
-                "alineacion_local": [
-                    {"nombre": "Courtois", "posicion": "POR", "dorsal": 1},
-                    {"nombre": "Carvajal", "posicion": "LD", "dorsal": 2},
-                    {"nombre": "Militão", "posicion": "DFC", "dorsal": 3},
-                    {"nombre": "Alaba", "posicion": "DFC", "dorsal": 4},
-                    {"nombre": "Mendy", "posicion": "LI", "dorsal": 23},
-                    {"nombre": "Tchouaméni", "posicion": "MCD", "dorsal": 18},
-                    {"nombre": "Kroos", "posicion": "MC", "dorsal": 8},
-                    {"nombre": "Modric", "posicion": "MC", "dorsal": 10},
-                    {"nombre": "Bellingham", "posicion": "MCO", "dorsal": 5},
-                    {"nombre": "Vinícius Jr.", "posicion": "EI", "dorsal": 7},
-                    {"nombre": "Benzema", "posicion": "DC", "dorsal": 9}
-                ],
-                "alineacion_visitante": [
-                    {"nombre": "Ter Stegen", "posicion": "POR", "dorsal": 1},
-                    {"nombre": "Koundé", "posicion": "LD", "dorsal": 23},
-                    {"nombre": "Araújo", "posicion": "DFC", "dorsal": 4},
-                    {"nombre": "Christensen", "posicion": "DFC", "dorsal": 15},
-                    {"nombre": "Balde", "posicion": "LI", "dorsal": 3},
-                    {"nombre": "De Jong", "posicion": "MC", "dorsal": 21},
-                    {"nombre": "Pedri", "posicion": "MC", "dorsal": 8},
-                    {"nombre": "Gavi", "posicion": "MC", "dorsal": 6},
-                    {"nombre": "Raphinha", "posicion": "ED", "dorsal": 22},
-                    {"nombre": "Lewandowski", "posicion": "DC", "dorsal": 9},
-                    {"nombre": "Ansu Fati", "posicion": "EI", "dorsal": 10}
-                ],
-                "suplentes_local": [
-                    {"nombre": "Lunin", "posicion": "POR", "dorsal": 13},
-                    {"nombre": "Nacho", "posicion": "DF", "dorsal": 6},
-                    {"nombre": "Camavinga", "posicion": "MC", "dorsal": 12},
-                    {"nombre": "Valverde", "posicion": "MC", "dorsal": 15},
-                    {"nombre": "Rodrygo", "posicion": "EX", "dorsal": 11},
-                    {"nombre": "Asensio", "posicion": "EX", "dorsal": 20},
-                    {"nombre": "Mariano", "posicion": "DC", "dorsal": 24}
-                ],
-                "suplentes_visitante": [
-                    {"nombre": "Peña", "posicion": "POR", "dorsal": 26},
-                    {"nombre": "Alba", "posicion": "DF", "dorsal": 18},
-                    {"nombre": "García", "posicion": "DF", "dorsal": 24},
-                    {"nombre": "Busquets", "posicion": "MC", "dorsal": 5},
-                    {"nombre": "Kessié", "posicion": "MC", "dorsal": 19},
-                    {"nombre": "Dembélé", "posicion": "EX", "dorsal": 7},
-                    {"nombre": "Ferran Torres", "posicion": "DC", "dorsal": 11}
-                ]
-            }
-        ]
-        
-        # Insertar partidos mock
-        for partido in partidos_mock:
-            cursor.execute('''
-                INSERT INTO partidos (
-                    id, fecha, liga, equipo_local, equipo_visitante, estadio, hora, estado,
-                    alineacion_local, alineacion_visitante, suplentes_local, suplentes_visitante
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                partido["id"],
-                partido["fecha"],
-                partido["liga"],
-                partido["equipo_local"],
-                partido["equipo_visitante"],
-                partido["estadio"],
-                partido["hora"],
-                partido["estado"],
-                json.dumps(partido["alineacion_local"]),
-                json.dumps(partido["alineacion_visitante"]),
-                json.dumps(partido["suplentes_local"]),
-                json.dumps(partido["suplentes_visitante"])
-            ))
-        
-        conn.commit()
-        conn.close()
-    
     def obtener_partidos_por_fecha(self, fecha=None):
         """Obtiene partidos filtrados por fecha"""
         conn = sqlite3.connect(self.db_path)
@@ -548,80 +504,6 @@ class PartidoModel:
         conn.close()
         return None
     
-    def crear_informe_scouting(self, informe_data):
-        """Crea un nuevo informe de scouting"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO informes_scouting (
-                partido_id, jugador_nombre, equipo, posicion, scout_usuario,
-                control_balon, primer_toque, pase_corto, pase_largo, finalizacion, regate,
-                vision_juego, posicionamiento, marcaje, pressing, transiciones,
-                velocidad, resistencia, fuerza, salto, agilidad,
-                concentracion, liderazgo, comunicacion, presion, decision,
-                nota_general, potencial, recomendacion,
-                fortalezas, debilidades, observaciones, minutos_observados
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            informe_data['partido_id'],
-            informe_data['jugador_nombre'],
-            informe_data['equipo'],
-            informe_data['posicion'],
-            informe_data['scout_usuario'],
-            informe_data.get('control_balon'),
-            informe_data.get('primer_toque'),
-            informe_data.get('pase_corto'),
-            informe_data.get('pase_largo'),
-            informe_data.get('finalizacion'),
-            informe_data.get('regate'),
-            informe_data.get('vision_juego'),
-            informe_data.get('posicionamiento'),
-            informe_data.get('marcaje'),
-            informe_data.get('pressing'),
-            informe_data.get('transiciones'),
-            informe_data.get('velocidad'),
-            informe_data.get('resistencia'),
-            informe_data.get('fuerza'),
-            informe_data.get('salto'),
-            informe_data.get('agilidad'),
-            informe_data.get('concentracion'),
-            informe_data.get('liderazgo'),
-            informe_data.get('comunicacion'),
-            informe_data.get('presion'),
-            informe_data.get('decision'),
-            informe_data.get('nota_general'),
-            informe_data.get('potencial'),
-            informe_data.get('recomendacion'),
-            informe_data.get('fortalezas'),
-            informe_data.get('debilidades'),
-            informe_data.get('observaciones'),
-            informe_data.get('minutos_observados')
-        ))
-        
-        informe_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return informe_id
-    
-    def obtener_informes_por_usuario(self, usuario):
-        """Obtiene todos los informes de un scout"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT i.*, p.equipo_local, p.equipo_visitante, p.fecha 
-            FROM informes_scouting i
-            JOIN partidos p ON i.partido_id = p.id
-            WHERE i.scout_usuario = ?
-            ORDER BY i.fecha_creacion DESC
-        ''', (usuario,))
-        
-        informes = cursor.fetchall()
-        conn.close()
-        return informes
-
     def obtener_todos_informes(self):
         """
         Obtiene TODOS los informes de scouting de todos los scouts
@@ -640,10 +522,11 @@ class PartidoModel:
             ORDER BY i.fecha_creacion DESC
         ''')
         
-        # CORREGIDO: Convertir resultados a lista de diccionarios
+        # Obtener nombres de columnas
         columns = [description[0] for description in cursor.description]
-        informes = []
         
+        # Convertir resultados a lista de diccionarios
+        informes = []
         for row in cursor.fetchall():
             informe_dict = dict(zip(columns, row))
             informes.append(informe_dict)
@@ -652,7 +535,6 @@ class PartidoModel:
         
         logger.info(f"📊 Obtenidos {len(informes)} informes totales")
         return informes
-
 
     def obtener_estadisticas_dashboard(self):
         """
@@ -749,7 +631,7 @@ class PartidoModel:
                 'total_informes': stats_generales[0] or 0,
                 'total_scouts': stats_generales[1] or 0,
                 'partidos_scouted': stats_generales[2] or 0,
-                'nota_promedio': round(stats_generales[3] or 0, 1),
+                'nota_promedio': round(stats_generales[3] or 0, 1) if stats_generales[3] else 0,
                 'recomendados_contratar': stats_generales[4] or 0,
                 'alto_potencial': stats_generales[5] or 0,
                 'informes_recientes': informes_recientes
@@ -758,7 +640,7 @@ class PartidoModel:
                 {
                     'scout': scout[0],
                     'informes': scout[1],
-                    'nota_promedio': round(scout[2] or 0, 1),
+                    'nota_promedio': round(scout[2] or 0, 1) if scout[2] else 0,
                     'recomendados': scout[3]
                 } for scout in top_scouts
             ],
@@ -766,7 +648,7 @@ class PartidoModel:
                 {
                     'liga': liga[0],
                     'informes': liga[1],
-                    'nota_promedio': round(liga[2] or 0, 1)
+                    'nota_promedio': round(liga[2] or 0, 1) if liga[2] else 0
                 } for liga in stats_ligas
             ],
             'recomendaciones': [
@@ -780,7 +662,7 @@ class PartidoModel:
                 'procesados': stats_wyscout[0] or 0,
                 'matches_exitosos': stats_wyscout[1] or 0,
                 'no_encontrados': stats_wyscout[2] or 0,
-                'confianza_promedio': round(stats_wyscout[3] or 0, 1)
+                'confianza_promedio': round(stats_wyscout[3] or 0, 1) if stats_wyscout[3] else 0
             }
         }
         
@@ -808,7 +690,7 @@ class PartidoModel:
             ORDER BY i.fecha_creacion DESC
         '''.format(dias))
         
-        # CORREGIDO: Convertir a diccionarios
+        # Convertir a diccionarios
         columns = [description[0] for description in cursor.description]
         informes_recientes = []
         
@@ -851,7 +733,7 @@ class PartidoModel:
             LIMIT ?
         ''', (limite,))
         
-        # CORREGIDO: Convertir a diccionarios
+        # Convertir a diccionarios
         columns = [description[0] for description in cursor.description]
         mejores_jugadores = []
         
@@ -894,13 +776,13 @@ class PartidoModel:
             ORDER BY CAST(strftime('%w', fecha_creacion) AS INTEGER)
         ''')
         
-        # CORREGIDO: Convertir a diccionarios
+        # Convertir a diccionarios
         actividad_semanal = []
         for row in cursor.fetchall():
             actividad_semanal.append({
                 'dia': row[0],
                 'informes': row[1],
-                'nota_promedio': round(row[2] or 0, 1)
+                'nota_promedio': round(row[2] or 0, 1) if row[2] else 0
             })
         
         conn.close()
@@ -908,31 +790,30 @@ class PartidoModel:
         logger.info(f"📅 Obtenida actividad semanal: {len(actividad_semanal)} días con datos")
         return actividad_semanal
 
-def actualizar_wyscout_match(self, informe_id, estado, confianza=None):
-    """
-    Actualiza el estado de Wyscout Match en un informe
-    
-    Args:
-        informe_id (int): ID del informe
-        estado (str): "Encontrado" o "No encontrado" 
-        confianza (float): % de confianza si fue encontrado
-    """
-    conn = sqlite3.connect(self.db_path)
-    cursor = conn.cursor()
-    
-    if estado == "Encontrado" and confianza:
-        wyscout_match = f"Encontrado ({confianza:.1f}%)"
-    else:
-        wyscout_match = "No encontrado"
-    
-    cursor.execute('''
-        UPDATE informes_scouting 
-        SET wyscout_match = ?
-        WHERE id = ?
-    ''', (wyscout_match, informe_id))
-    
-    conn.commit()
-    conn.close()
-    
-    return wyscout_match
-
+    def actualizar_wyscout_match(self, informe_id, estado, confianza=None):
+        """
+        Actualiza el estado de Wyscout Match en un informe
+        
+        Args:
+            informe_id (int): ID del informe
+            estado (str): "Encontrado" o "No encontrado" 
+            confianza (float): % de confianza si fue encontrado
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if estado == "Encontrado" and confianza:
+            wyscout_match = f"Encontrado ({confianza:.1f}%)"
+        else:
+            wyscout_match = "No encontrado"
+        
+        cursor.execute('''
+            UPDATE informes_scouting 
+            SET wyscout_match = ?
+            WHERE id = ?
+        ''', (wyscout_match, informe_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return wyscout_match

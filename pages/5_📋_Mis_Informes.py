@@ -15,6 +15,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 from common.login import LoginManager
+# Justo después de current_user = login_manager.get_current_user()
 from models.partido_model import PartidoModel
 from models.jugador_model import JugadorModel
 
