@@ -659,10 +659,25 @@ try:
         'nota_general', 'potencial', 'recomendacion',
         'fortalezas', 'debilidades', 'observaciones', 'minutos_observados',
         'jugador_bd_id', 'wyscout_match_confianza', 'wyscout_algoritmo', 'procesado_wyscout',
-        'fecha_creacion', 'equipo_local', 'equipo_visitante', 'fecha_partido', 'estado_wyscout'
+        'fecha_creacion', 'tipo_evaluacion', 'imagen_url',  # AÑADIDAS ESTAS DOS COLUMNAS
+        'equipo_local', 'equipo_visitante', 'fecha_partido', 'estado_wyscout'
     ]
     
-    df_informes = pd.DataFrame(informes_data, columns=columns[:len(informes_data[0])] if informes_data else [])
+    # Verificar número de columnas antes de crear DataFrame
+    if informes_data:
+        num_columnas_datos = len(informes_data[0])
+        num_columnas_definidas = len(columns)
+        
+        if num_columnas_datos != num_columnas_definidas:
+            print(f"⚠️ Advertencia: {num_columnas_datos} columnas en datos vs {num_columnas_definidas} definidas")
+            # Usar solo las columnas que coincidan
+            columns_to_use = columns[:num_columnas_datos]
+        else:
+            columns_to_use = columns
+            
+        df_informes = pd.DataFrame(informes_data, columns=columns_to_use)
+    else:
+        df_informes = pd.DataFrame(columns=columns)
     
     # Estadísticas generales
     total_informes = len(df_informes)

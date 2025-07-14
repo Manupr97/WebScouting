@@ -191,52 +191,104 @@ def limpiar_columnas_duplicadas(columnas):
             resultado.append(col)
     return resultado
 
+@st.cache_data(ttl=3600)  # Cache por 1 hora
 def cargar_datos_wyscout_simple():
-    """Carga datos sin cache agresivo"""
+    """Carga datos directamente del Excel"""
     try:
-        wyscout_model = WyscoutModel()
-        return wyscout_model.get_all_players()
+        # En lugar de: wyscout_model.get_all_players()
+        df = pd.read_excel('data\wyscout_LaLiga_limpio.xlsx')
+        return df
     except Exception as e:
-        st.error(f"Error cargando Wyscout: {str(e)}")
+        st.error(f"Error cargando Excel: {str(e)}")
         return pd.DataFrame()
 
 def cargar_datos_personales_reales():
-    """Carga SOLO jugadores con informes reales (no ficticios)"""
+    """
+    Carga los jugadores directamente de jugadores_observados con TODAS las nuevas columnas
+    """
     try:
-        # Obtener informes reales primero
-        from models.partido_model import PartidoModel
-        partido_model = PartidoModel()
-        informes_reales = partido_model.obtener_todos_informes()
+        import sqlite3
+        conn = sqlite3.connect('data/jugadores.db')
         
-        if not informes_reales:
-            return pd.DataFrame()
+        # Query que NO filtra por total_informes para asegurar que veamos TODOS los jugadores
+        query = """
+        SELECT 
+            id,
+            COALESCE(jugador, nombre_completo) as nombre_completo,
+            equipo,
+            posicion,
+            numero_camiseta,
+            CASE 
+                WHEN edad IS NULL OR edad = 0 THEN NULL
+                ELSE edad 
+            END as edad,
+            nacionalidad,
+            liga,
+            imagen_url,
+            escudo_equipo,
+            veces_observado,
+            COALESCE(estado, 'Evaluado') as estado_observacion,
+            COALESCE(nota_general, 0) as nota_general,
+            COALESCE(nota_promedio, nota_general, 0) as nota_promedio,
+            COALESCE(mejor_nota, nota_general, 0) as mejor_nota,
+            COALESCE(peor_nota, nota_general, 0) as peor_nota,
+            COALESCE(total_informes, 1) as total_informes,
+            ultima_fecha_visto,
+            scout_agregado,
+            -- Agregar campo de recomendación basado en nota_promedio o nota_general
+            CASE 
+                WHEN COALESCE(nota_promedio, nota_general, 0) >= 7 THEN 'Fichar'
+                WHEN COALESCE(nota_promedio, nota_general, 0) >= 5 THEN 'Seguir observando'
+                WHEN COALESCE(nota_promedio, nota_general, 0) > 0 THEN 'Descartar'
+                ELSE 'Sin evaluar'
+            END as recomendacion_calculada
+        FROM jugadores_observados
+        WHERE 1=1  -- Sin filtros, mostrar TODOS
+        ORDER BY 
+            COALESCE(nota_promedio, nota_general, 0) DESC,
+            COALESCE(total_informes, 0) DESC,
+            id DESC
+        """
         
-        # Extraer nombres de jugadores con informes reales
-        jugadores_con_informes = set()
-        for informe in informes_reales:
-            nombre_jugador = informe.get('jugador_nombre', '').strip()
-            if nombre_jugador:
-                jugadores_con_informes.add(nombre_jugador.lower())
+        df = pd.read_sql_query(query, conn)
         
-        if not jugadores_con_informes:
-            return pd.DataFrame()
+        # IMPORTANTE: Para jugadores sin nota_promedio, usar nota_general
+        if not df.empty:
+            # Asegurar que las notas no sean None/NaN
+            df['nota_promedio'] = df.apply(
+                lambda row: row['nota_general'] if pd.isna(row['nota_promedio']) or row['nota_promedio'] == 0 
+                else row['nota_promedio'], 
+                axis=1
+            )
+            
+            df['mejor_nota'] = df.apply(
+                lambda row: row['nota_general'] if pd.isna(row['mejor_nota']) or row['mejor_nota'] == 0 
+                else row['mejor_nota'], 
+                axis=1
+            )
+            
+            df['peor_nota'] = df.apply(
+                lambda row: row['nota_general'] if pd.isna(row['peor_nota']) or row['peor_nota'] == 0 
+                else row['peor_nota'], 
+                axis=1
+            )
         
-        # Cargar base personal y filtrar solo los que tienen informes
-        jugador_model = JugadorModel()
-        df_personal = jugador_model.obtener_jugadores_observados()
+        conn.close()
         
-        if df_personal.empty:
-            return pd.DataFrame()
+        # Log para debug
+        print(f"✅ Cargados {len(df)} jugadores de la base personal")
+        if len(df) > 0:
+            print(f"   Columnas disponibles: {', '.join(df.columns)}")
+            print(f"\n   Primeros jugadores:")
+            for idx, row in df.head(5).iterrows():
+                print(f"   - {row['nombre_completo']} ({row['equipo']}) - Nota: {row['nota_promedio']:.1f}, Informes: {row['total_informes']}")
         
-        # Filtrar solo jugadores que están en informes reales
-        df_filtrado = df_personal[
-            df_personal['nombre_completo'].str.lower().isin(jugadores_con_informes)
-        ]
-        
-        return df_filtrado
+        return df
         
     except Exception as e:
         st.warning(f"Error cargando datos personales: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def cargar_lista_objetivos():
@@ -579,24 +631,6 @@ with tab1:
                 st.caption(f"Mostrando registros {inicio + 1}-{fin} de {total_registros:,}")
             
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Botones de acción
-            st.markdown("#### Acciones")
-            col_a1, col_a2 = st.columns(2)
-            
-            with col_a1:
-                if st.button("📊 Análisis", use_container_width=True):
-                    st.switch_page("pages/3_📊_Visualizaciones.py")
-            
-            with col_a2:
-                csv = df_filtrado[columnas_mostrar].to_csv(index=False)
-                st.download_button(
-                    "📁 Exportar CSV",
-                    csv,
-                    f"wyscout_{datetime.now().strftime('%Y%m%d')}.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
         
         else:
             st.warning("Sin resultados con estos filtros")
@@ -611,7 +645,7 @@ with tab2:
     
     if not df_personal.empty:
         # Filtros simples
-        col_f1, col_f2, col_f3 = st.columns(3)
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         
         with col_f1:
             busqueda_personal = st.text_input("🔍 Buscar:", key="search_personal")
@@ -624,11 +658,35 @@ with tab2:
             equipo_personal = st.selectbox("🏠 Equipo:", equipos_personal, key="team_personal")
         
         with col_f3:
-            if 'estado_observacion' in df_personal.columns:
-                estados = ['Todos'] + sorted(df_personal['estado_observacion'].dropna().unique().tolist())
+            if 'recomendacion_calculada' in df_personal.columns:
+                recomendaciones = ['Todas'] + sorted(df_personal['recomendacion_calculada'].dropna().unique().tolist())
             else:
-                estados = ['Todos']
-            estado = st.selectbox("📊 Estado:", estados, key="state_personal")
+                recomendaciones = ['Todas']
+            recomendacion_filtro = st.selectbox("💼 Recomendación:", recomendaciones, key="rec_personal")
+        
+        with col_f4:
+            # Filtro por rango de nota promedio
+            if 'nota_promedio' in df_personal.columns and not df_personal['nota_promedio'].isna().all():
+                nota_min = float(df_personal['nota_promedio'].min())
+                nota_max = float(df_personal['nota_promedio'].max())
+                # Asegurar que todos los valores son float y agregar step
+                nota_rango = st.slider(
+                    "⭐ Nota Media:", 
+                    min_value=0.0, 
+                    max_value=10.0, 
+                    value=(max(0.0, nota_min), min(10.0, nota_max)), 
+                    step=0.1,
+                    key="nota_range"
+                )
+            else:
+                nota_rango = st.slider(
+                    "⭐ Nota Media:", 
+                    min_value=0.0, 
+                    max_value=10.0, 
+                    value=(0.0, 10.0), 
+                    step=0.1,
+                    key="nota_range"
+                )
         
         # Aplicar filtros
         df_personal_filtrado = df_personal.copy()
@@ -641,60 +699,263 @@ with tab2:
         if equipo_personal != 'Todos' and 'equipo' in df_personal_filtrado.columns:
             df_personal_filtrado = df_personal_filtrado[df_personal_filtrado['equipo'] == equipo_personal]
         
-        if estado != 'Todos' and 'estado_observacion' in df_personal_filtrado.columns:
-            df_personal_filtrado = df_personal_filtrado[df_personal_filtrado['estado_observacion'] == estado]
+        if recomendacion_filtro != 'Todas' and 'recomendacion_calculada' in df_personal_filtrado.columns:
+            df_personal_filtrado = df_personal_filtrado[df_personal_filtrado['recomendacion_calculada'] == recomendacion_filtro]
+        
+        # Filtro por nota - CORREGIDO para manejar valores None/NaN
+        if 'nota_promedio' in df_personal_filtrado.columns:
+            # Convertir a float y manejar NaN
+            df_personal_filtrado['nota_promedio'] = pd.to_numeric(df_personal_filtrado['nota_promedio'], errors='coerce')
+            
+            # Aplicar filtro solo a valores no-NaN
+            mask = (
+                df_personal_filtrado['nota_promedio'].isna() |  # Incluir NaN
+                (
+                    (df_personal_filtrado['nota_promedio'] >= nota_rango[0]) & 
+                    (df_personal_filtrado['nota_promedio'] <= nota_rango[1])
+                )
+            )
+            df_personal_filtrado = df_personal_filtrado[mask]
         
         st.markdown(f"#### 📋 Resultados: {len(df_personal_filtrado)} jugadores")
         
         if len(df_personal_filtrado) > 0:
-            # Definir columnas
-            columnas_personal = ['nombre_completo', 'equipo', 'posicion', 'edad', 'veces_observado', 'estado_observacion']
-            columnas_disponibles = [col for col in columnas_personal if col in df_personal_filtrado.columns]
+            # Preparar DataFrame para mostrar
+            df_vista = df_personal_filtrado.copy()
             
-            # Configurar columnas
+            # Agregar emoji de recomendación para mejor visualización
+            if 'recomendacion_calculada' in df_vista.columns:
+                df_vista['recomendacion_visual'] = df_vista['recomendacion_calculada'].apply(
+                    lambda x: '🟢 Fichar' if x == 'Fichar' else 
+                             '🟡 Seguir' if 'Seguir' in str(x) else 
+                             '🔴 Descartar' if x == 'Descartar' else 
+                             '⚪ Sin evaluar'
+                )
+            
+            # Definir TODAS las columnas a mostrar (incluyendo imagen)
+            columnas_completas = [
+                'imagen_url',
+                'nombre_completo', 
+                'equipo',
+                'escudo_equipo',
+                'posicion',
+                'numero_camiseta',
+                'edad',
+                'nacionalidad',
+                'liga',
+                'nota_promedio',
+                'mejor_nota',
+                'peor_nota',
+                'total_informes',
+                'veces_observado',
+                'ultima_fecha_visto',
+                'recomendacion_visual',
+                'scout_agregado'
+            ]
+            
+            # Filtrar solo columnas disponibles
+            columnas_disponibles = [col for col in columnas_completas if col in df_vista.columns]
+            
+            # Configuración completa de columnas
             column_config = {
-                'nombre_completo': st.column_config.TextColumn("Jugador"),
-                'equipo': st.column_config.TextColumn("Equipo"),
-                'posicion': st.column_config.TextColumn("Posición"),
-                'edad': st.column_config.NumberColumn("Edad", format="%d años"),
-                'veces_observado': st.column_config.NumberColumn("Observaciones", format="%d"),
-                'estado_observacion': st.column_config.TextColumn("Estado")
+                'imagen_url': st.column_config.ImageColumn(
+                    "Foto",
+                    width="small",
+                    help="Foto del jugador"
+                ),
+                'nombre_completo': st.column_config.TextColumn(
+                    "Jugador", 
+                    width="medium",
+                    help="Nombre completo del jugador"
+                ),
+                'equipo': st.column_config.TextColumn(
+                    "Equipo", 
+                    width="medium"
+                ),
+                'escudo_equipo': st.column_config.ImageColumn(
+                    "Escudo",
+                    width="small",
+                    help="Escudo del equipo"
+                ),
+                'posicion': st.column_config.TextColumn(
+                    "Posición", 
+                    width="small"
+                ),
+                'numero_camiseta': st.column_config.TextColumn(
+                    "Dorsal", 
+                    width="small"
+                ),
+                'edad': st.column_config.NumberColumn(
+                    "Edad", 
+                    format="%d",
+                    width="small"
+                ),
+                'nacionalidad': st.column_config.TextColumn(
+                    "País", 
+                    width="small"
+                ),
+                'liga': st.column_config.TextColumn(
+                    "Liga", 
+                    width="medium"
+                ),
+                'nota_promedio': st.column_config.ProgressColumn(
+                    "Nota Media",
+                    width="small",
+                    format="%.1f",
+                    min_value=0,
+                    max_value=10
+                ),
+                'mejor_nota': st.column_config.NumberColumn(
+                    "Mejor", 
+                    format="%.0f",
+                    width="small"
+                ),
+                'peor_nota': st.column_config.NumberColumn(
+                    "Peor", 
+                    format="%.0f",
+                    width="small"
+                ),
+                'total_informes': st.column_config.NumberColumn(
+                    "Informes", 
+                    format="%d",
+                    width="small"
+                ),
+                'veces_observado': st.column_config.NumberColumn(
+                    "Veces Visto", 
+                    format="%d",
+                    width="small"
+                ),
+                'ultima_fecha_visto': st.column_config.DateColumn(
+                    "Última Vez", 
+                    width="small",
+                    format="DD/MM/YYYY"
+                ),
+                'recomendacion_visual': st.column_config.TextColumn(
+                    "Recomendación",
+                    width="medium",
+                    help="Recomendación basada en nota promedio"
+                ),
+                'scout_agregado': st.column_config.TextColumn(
+                    "Scout",
+                    width="small",
+                    help="Scout que agregó al jugador"
+                )
             }
             
+            # Mostrar tabla completa con todas las funcionalidades
             st.dataframe(
-                df_personal_filtrado[columnas_disponibles],
+                df_vista[columnas_disponibles],
                 use_container_width=True,
-                height=500,
+                height=600,  # Altura mayor para mejor visualización
                 column_config=column_config,
                 hide_index=True
             )
             
-            # Estadísticas
-            col_s1, col_s2, col_s3 = st.columns(3)
+            # Estadísticas mejoradas con más información
+            st.markdown("#### 📊 Estadísticas")
             
+            col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
+
             with col_s1:
-                if 'veces_observado' in df_personal_filtrado.columns:
-                    promedio = df_personal_filtrado['veces_observado'].mean()
-                    st.metric("Promedio Observaciones", f"{promedio:.1f}")
-            
+                if 'nota_promedio' in df_personal_filtrado.columns:
+                    nota_media_global = df_personal_filtrado['nota_promedio'].mean()
+                    st.metric("📊 Nota Media Global", f"{nota_media_global:.1f}/10")
+                else:
+                    st.metric("📊 Nota Media Global", "N/A")
+
             with col_s2:
-                if 'edad' in df_personal_filtrado.columns:
-                    edad_promedio = df_personal_filtrado['edad'].mean()
-                    st.metric("Edad Promedio", f"{edad_promedio:.1f} años")
-            
+                if 'total_informes' in df_personal_filtrado.columns:
+                    total_informes_sum = df_personal_filtrado['total_informes'].sum()
+                    st.metric("📝 Total Informes", total_informes_sum)
+                else:
+                    st.metric("📝 Total Informes", 0)
+
             with col_s3:
-                total_observaciones = df_personal_filtrado['veces_observado'].sum() if 'veces_observado' in df_personal_filtrado.columns else 0
-                st.metric("Total Observaciones", total_observaciones)
+                if 'recomendacion_calculada' in df_personal_filtrado.columns:
+                    fichajes_recom = len(df_personal_filtrado[df_personal_filtrado['recomendacion_calculada'] == 'Fichar'])
+                    st.metric("🟢 Para Fichar", fichajes_recom)
+                else:
+                    st.metric("🟢 Para Fichar", 0)
+
+            with col_s4:
+                if 'nacionalidad' in df_personal_filtrado.columns:
+                    paises_unicos = df_personal_filtrado['nacionalidad'].nunique()
+                    st.metric("🌍 Países", paises_unicos)
+                else:
+                    st.metric("🌍 Países", "N/A")
+
+            with col_s5:
+                if 'liga' in df_personal_filtrado.columns:
+                    ligas_unicas = df_personal_filtrado['liga'].nunique()
+                    st.metric("🏆 Ligas", ligas_unicas)
+                else:
+                    st.metric("🏆 Ligas", "N/A")
+            
+            # Top jugadores - CORREGIDO
+            if 'nota_promedio' in df_vista.columns and len(df_vista) > 0:
+                # Filtrar jugadores con nota válida
+                df_con_nota = df_vista[df_vista['nota_promedio'].notna() & (df_vista['nota_promedio'] > 0)]
+                
+                if len(df_con_nota) > 0:
+                    st.markdown("#### 🏆 Top 5 Mejores Jugadores")
+                    
+                    # Obtener top 5
+                    top_jugadores = df_con_nota.nlargest(5, 'nota_promedio')
+                    
+                    # Mostrar top jugadores con formato especial
+                    for idx, (_, jugador) in enumerate(top_jugadores.iterrows()):
+                        col1, col2, col3 = st.columns([1, 3, 1])
+                        
+                        with col1:
+                            if pd.notna(jugador.get('imagen_url')) and jugador['imagen_url'] != '':
+                                st.image(jugador['imagen_url'], width=60)
+                            else:
+                                st.markdown("👤")
+                        
+                        with col2:
+                            st.markdown(f"**{idx + 1}. {jugador['nombre_completo']}**")
+                            st.caption(f"{jugador['equipo']} • {jugador.get('posicion', 'N/A')}")
+                        
+                        with col3:
+                            st.metric("Nota", f"{jugador['nota_promedio']:.1f}", 
+                                     delta=f"{jugador.get('total_informes', 1)} informes",
+                                     delta_color="off")
+                            if 'recomendacion_visual' in jugador:
+                                st.caption(jugador['recomendacion_visual'])
+                            else:
+                                # Calcular recomendación si no existe
+                                nota = jugador['nota_promedio']
+                                if nota >= 7:
+                                    st.caption("🟢 Fichar")
+                                elif nota >= 5:
+                                    st.caption("🟡 Seguir")
+                                else:
+                                    st.caption("🔴 Descartar")
         
         else:
-            st.warning("Sin jugadores con estos filtros")
+            st.warning("🔍 No se encontraron jugadores con los filtros aplicados")
+            
+            if st.button("🔄 Limpiar Filtros", use_container_width=True):
+                st.rerun()
     
     else:
         st.info("🎯 Tu base personal está vacía")
-        st.write("Crea informes de scouting para llenar tu base personal.")
+        st.write("Los jugadores aparecerán aquí automáticamente cuando crees informes de scouting.")
         
-        if st.button("⚽ Crear Informe", use_container_width=True):
-            st.switch_page("pages/4_⚽_Centro de Scouting.py")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("⚽ Crear Mi Primer Informe", use_container_width=True, type="primary"):
+                st.switch_page("pages/4_⚽_Centro de Scouting.py")
+        
+        with col2:
+            if st.button("📚 Ver Tutorial", use_container_width=True):
+                st.info("""
+                **Cómo llenar tu base personal:**
+                1. Ve al Centro de Scouting
+                2. Selecciona un partido
+                3. Evalúa jugadores y guarda informes
+                4. Los jugadores aparecerán automáticamente aquí
+                """)
 
 # ==================== PESTAÑA 3: LISTA OBJETIVOS ====================
 with tab3:
@@ -838,7 +1099,7 @@ with st.sidebar:
         st.switch_page("pages/4_⚽_Centro de Scouting.py")
     
     if st.button("📋 Mis Informes", use_container_width=True):
-        st.switch_page("pages/4_📋_Mis_Informes.py")
+        st.switch_page("pages/5_📋_Mis_Informes.py")
     
     st.markdown("---")
     

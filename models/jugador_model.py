@@ -439,6 +439,65 @@ class JugadorModel:
         conn.close()
         
         return jugador_id
+
+    def añadir_jugador_manual(self, nombre, equipo, posicion='N/A', nota_promedio=5, scout='admin', informe_id=None):
+        """
+        Añade un jugador a la BD personal de forma SIMPLE e INDEPENDIENTE
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Ver si ya existe
+            cursor.execute('''
+                SELECT id, veces_observado, nota_general 
+                FROM jugadores_observados 
+                WHERE (jugador = ? OR nombre_completo = ?) AND equipo = ?
+            ''', (nombre, nombre, equipo))
+            
+            existe = cursor.fetchone()
+            
+            if existe:
+                jugador_id, veces_actual, nota_anterior = existe
+                # Calcular nueva nota promedio
+                nueva_nota = ((nota_anterior or 0) * veces_actual + nota_promedio) / (veces_actual + 1)
+                
+                cursor.execute('''
+                    UPDATE jugadores_observados SET
+                        veces_observado = veces_observado + 1,
+                        nota_general = ?,
+                        fecha_observacion = ?,
+                        posicion = COALESCE(?, posicion),
+                        estado = 'Evaluado'
+                    WHERE id = ?
+                ''', (nueva_nota, datetime.now().strftime('%Y-%m-%d'), posicion, jugador_id))
+                
+            else:
+                # Crear nuevo - SOLO en jugadores_observados, NADA de Wyscout
+                cursor.execute('''
+                    INSERT INTO jugadores_observados (
+                        jugador, nombre_completo, equipo, posicion,
+                        fecha_observacion, scout, nota_general, 
+                        veces_observado, estado
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    nombre, nombre, equipo, posicion,
+                    datetime.now().strftime('%Y-%m-%d'), scout,
+                    nota_promedio, 1, 'Evaluado'
+                ))
+                
+                jugador_id = cursor.lastrowid
+            
+            conn.commit()
+            logger.info(f"✅ Jugador {'actualizado' if existe else 'añadido'}: {nombre} (ID: {jugador_id})")
+            return jugador_id
+            
+        except Exception as e:
+            logger.error(f"❌ Error: {str(e)}")
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
     
     def _limpiar_nombre(self, texto):
         """Limpia texto para comparación"""

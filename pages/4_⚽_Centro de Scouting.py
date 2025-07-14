@@ -26,6 +26,15 @@ except ImportError as e:
     print(f"⚠️ BeSoccer scraper no disponible: {e}")
     BESOCCER_DISPONIBLE = False
 
+# Después de los otros imports, añadir:
+try:
+    from utils.db_helpers import actualizar_jugador_desde_scraper, procesar_alineaciones_completas
+    DB_HELPERS_DISPONIBLE = True
+    print("✅ DB Helpers disponible")
+except ImportError as e:
+    print(f"⚠️ DB Helpers no disponible: {e}")
+    DB_HELPERS_DISPONIBLE = False
+
 # Configuración de la página
 st.set_page_config(
     page_title="Centro de Scouting - Scouting Pro",
@@ -228,6 +237,7 @@ if not login_manager.is_authenticated():
     st.stop()
 
 current_user = login_manager.get_current_user()
+print(f"DEBUG Centro Scouting - current_user: {current_user}")
 
 # Header principal
 st.markdown(f"""
@@ -285,7 +295,6 @@ def buscar_alineaciones_automatico(partido):
         print("❌ BeSoccer no disponible para búsqueda automática")
         return None
     
-    # CORREGIR: Usar besoccer_id en lugar de besocrer_id
     besoccer_id = partido.get('besoccer_id')
     if not besoccer_id:
         print(f"❌ No hay besoccer_id en el partido: {partido.keys()}")
@@ -307,6 +316,10 @@ def buscar_alineaciones_automatico(partido):
                 st.session_state.partido_activo['alineacion_visitante'] = resultado['alineacion_visitante']
             
             print(f"✅ Alineaciones encontradas automáticamente: {len(resultado['alineacion_local'])} vs {len(resultado['alineacion_visitante'])}")
+            
+            # ELIMINADO: Ya NO procesamos jugadores automáticamente
+            # Solo mostramos las alineaciones
+            
             return resultado
         else:
             print(f"❌ No se encontraron alineaciones: {resultado.get('mensaje', 'Sin mensaje') if resultado else 'Sin resultado'}")
@@ -321,7 +334,6 @@ def buscar_alineaciones_manual(partido):
         st.error("❌ Sistema de scraping no disponible")
         return None
     
-    # CORREGIR: Usar besoccer_id en lugar de besocrer_id
     besoccer_id = partido.get('besoccer_id')
     if not besoccer_id:
         st.error("❌ Este partido no tiene ID de BeSoccer válido")
@@ -357,6 +369,8 @@ def buscar_alineaciones_manual(partido):
             status_text.text("✅ ¡Alineaciones encontradas!")
             
             print(f"✅ Búsqueda manual exitosa: {len(resultado['alineacion_local'])} vs {len(resultado['alineacion_visitante'])}")
+            
+            # ELIMINADO: Ya NO procesamos jugadores automáticamente
             
             # Limpiar progreso después de un momento
             import time
@@ -750,8 +764,7 @@ def guardar_evaluacion_temporal(player, partido, posicion_real):
 
 
 def guardar_informe_final_campo(player, partido, posicion_real):
-    """Prepara y guarda el informe final en la base de datos"""
-    
+    """Prepara y guarda el informe final en la base de datos"""    
     try:
         # Calcular estadísticas
         total_acciones = (st.session_state.acciones_partido['positivas'] + 
@@ -763,7 +776,7 @@ def guardar_informe_final_campo(player, partido, posicion_real):
         else:
             porcentaje_positivas = 0
         
-        # Preparar observaciones
+        # Preparar observaciones mejoradas
         observaciones = f"""
 EVALUACIÓN EN CAMPO - {posicion_real}
 
@@ -772,31 +785,52 @@ Acciones registradas:
 - Neutras: {st.session_state.acciones_partido['neutras']}
 - Negativas: {st.session_state.acciones_partido['negativas']}
 
-Primera Parte: {st.session_state.evaluacion_temporal.get('obs_primera', 'Sin observaciones')}
-
-Segunda Parte: {st.session_state.evaluacion_temporal.get('obs_segunda', 'Sin observaciones')}
-        """
+EVENTOS DESTACADOS:
+"""
+        
+        # Añadir eventos más relevantes
+        eventos_relevantes = st.session_state.acciones_partido['eventos'][-10:]  # Últimos 10 eventos
+        for evento in eventos_relevantes:
+            observaciones += f"\n- Min {evento['minuto']}: {evento['nota']} [{evento['tipo'].upper()}]"
+        
+        observaciones += f"\n\nObservaciones generales: {st.session_state.evaluacion_temporal.get('obs_general', 'Sin observaciones adicionales')}"
         
         # Recopilar fortalezas y debilidades basadas en evaluación
         fortalezas = []
         debilidades = []
+        aspectos_evaluados = []
         
         for key, value in st.session_state.evaluacion_temporal.items():
-            if key.startswith('aspecto_') and value >= 7:
+            if key.startswith('aspecto_'):
                 aspecto_nombre = key.replace('aspecto_', '')
-                fortalezas.append(f"{aspecto_nombre}: {value}/10")
-            elif key.startswith('aspecto_') and value <= 4:
-                aspecto_nombre = key.replace('aspecto_', '')
-                debilidades.append(f"{aspecto_nombre}: {value}/10")
+                if value >= 7:
+                    fortalezas.append(f"{aspecto_nombre}: {value}/10")
+                elif value <= 4:
+                    debilidades.append(f"{aspecto_nombre}: {value}/10")
+                aspectos_evaluados.append(f"{aspecto_nombre}: {value}")
         
-        # Determinar recomendación basada en nota general
+        # Determinar recomendación basada en nota general y rendimiento
         nota_general = st.session_state.evaluacion_temporal.get('nota_general', 5)
-        if nota_general >= 7:
+        
+        # Ajustar nota ligeramente según el rendimiento en campo
+        if porcentaje_positivas > 70:
+            nota_ajustada = min(10, nota_general + 0.5)
+        elif porcentaje_positivas < 30:
+            nota_ajustada = max(1, nota_general - 0.5)
+        else:
+            nota_ajustada = nota_general
+        
+        if nota_ajustada >= 7:
             recomendacion = 'fichar'
-        elif nota_general >= 5:
+        elif nota_ajustada >= 5:
             recomendacion = 'seguir_observando'
         else:
             recomendacion = 'descartar'
+
+        # Si hay alguna clave con 'img' o 'image', mostrarla
+        for key in player.keys():
+            if 'img' in key.lower() or 'image' in key.lower() or 'foto' in key.lower():
+                print(f"   {key}: '{player[key]}'")
         
         # Preparar datos para partido_model
         informe_data = {
@@ -804,25 +838,68 @@ Segunda Parte: {st.session_state.evaluacion_temporal.get('obs_segunda', 'Sin obs
             'jugador_nombre': player['nombre'],
             'equipo': player['equipo'],
             'posicion': posicion_real,  # Usamos la posición real, no la de BeSoccer
-            'scout_usuario': current_user['usuario'],  # Usar el current_user del contexto global
-            'nota_general': nota_general,
+            'scout_usuario': current_user['usuario'],
+            'nota_general': nota_ajustada,
             'potencial': 'medio',  # Por defecto en evaluación de campo
             'recomendacion': recomendacion,
             'observaciones': observaciones.strip(),
             'minutos_observados': st.session_state.get('minuto_actual', 90),
-            'fortalezas': ', '.join(fortalezas) if fortalezas else 'Por determinar',
-            'debilidades': ', '.join(debilidades) if debilidades else 'Por determinar',
-            'tipo_evaluacion': 'campo'
+            'fortalezas': ', '.join(fortalezas) if fortalezas else 'Por determinar en análisis completo',
+            'debilidades': ', '.join(debilidades) if debilidades else 'Por determinar en análisis completo',
+            'tipo_evaluacion': 'campo',
+            'imagen_url': player.get('imagen_url', '')
         }
         
-        # Llamar a partido_model para guardar
+        print(f"DEBUG - informe_data: {informe_data}")
+        print(f"DEBUG - Llamando a crear_informe_scouting...")
+        
+        # NUEVO: Guardar el partido antes del informe
+        partido_model.guardar_partido_si_no_existe(partido)
+        
+        # Llamar a partido_model para guardar el informe
         informe_id = partido_model.crear_informe_scouting(informe_data)
+        print(f"DEBUG - Informe creado con ID: {informe_id}")
+        
+        # AHORA SÍ: Después de guardar el informe exitosamente, actualizamos/creamos el jugador en Base Personal
+        if DB_HELPERS_DISPONIBLE and informe_id:
+            try:
+                print("💾 Actualizando jugador en Base Personal DESPUÉS de guardar informe...")
+                
+                # Preparar datos completos del jugador
+                jugador_data = {
+                    'nombre': player['nombre'],
+                    'numero': player.get('numero', '?'),
+                    'posicion': posicion_real,  # Usar la posición real evaluada
+                    'imagen_url': player.get('imagen_url', ''),
+                    'es_titular': True  # Si lo evaluamos, asumimos que jugó
+                }
+                
+                # Preparar datos del partido con información correcta
+                partido_data = {
+                    **partido,
+                    'equipo': player['equipo'],
+                    'escudo_equipo': partido.get('escudo_local', '') if player['equipo'] == partido['equipo_local'] else partido.get('escudo_visitante', ''),
+                    'nota_evaluacion': nota_ajustada,  # Añadir la nota de la evaluación
+                    'recomendacion': recomendacion
+                }
+                
+                # Actualizar/crear jugador con la información del informe
+                from utils.db_helpers import actualizar_jugador_desde_informe
+                actualizar_jugador_desde_informe(jugador_data, partido_data, current_user['usuario'], informe_id)
+                
+                print("✅ Jugador actualizado en Base Personal con datos del informe")
+                
+            except Exception as e:
+                print(f"⚠️ Error actualizando Base Personal: {e}")
+                # No fallar si hay error al actualizar base personal
+        
         return True
         
     except Exception as e:
         print(f"Error al guardar informe: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
-
 
 def limpiar_estados_evaluacion():
     """Limpia los estados temporales después de guardar"""
@@ -1129,8 +1206,8 @@ elif st.session_state.modo_vista == 'observacion':
                 
                 for i, jugador in enumerate(titulares_local):
                     nombre = jugador.get('nombre', 'Sin nombre')
-                    numero = jugador.get('numero', '?')
-                    posicion = jugador.get('posicion', 'N/A')
+                    numero = jugador.get('numero') or jugador.get('dorsal') or '?'
+                    posicion = jugador.get('posicion') or jugador.get('position') or 'N/A'
                     imagen_url = jugador.get('imagen_url', '')
                     
                     # Verificar si es objetivo
@@ -1155,7 +1232,8 @@ elif st.session_state.modo_vista == 'observacion':
                             'numero': numero,
                             'partido_id': partido['id'],
                             'es_objetivo': es_objetivo,
-                            'datos_objetivo': datos_objetivo or {}
+                            'datos_objetivo': datos_objetivo or {},
+                            'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
                         }
                         st.rerun()
                 
@@ -1166,8 +1244,8 @@ elif st.session_state.modo_vista == 'observacion':
                     with st.expander(f"🔄 Suplentes ({len(suplentes_local)})", expanded=False):
                         for i, jugador in enumerate(suplentes_local):
                             nombre = jugador.get('nombre', 'Sin nombre')
-                            numero = jugador.get('numero', '?')
-                            posicion = jugador.get('posicion', 'N/A')
+                            numero = jugador.get('numero') or jugador.get('dorsal') or '?'
+                            posicion = jugador.get('posicion') or jugador.get('position') or 'N/A'
                             imagen_url = jugador.get('imagen_url', '')
                             
                             # Verificar si es objetivo
@@ -1204,7 +1282,8 @@ elif st.session_state.modo_vista == 'observacion':
                                         'numero': numero,
                                         'partido_id': partido['id'],
                                         'es_objetivo': es_objetivo,
-                                        'datos_objetivo': datos_objetivo or {}
+                                        'datos_objetivo': datos_objetivo or {},
+                                        'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
                                     }
                                     st.rerun()
             
@@ -1234,8 +1313,8 @@ elif st.session_state.modo_vista == 'observacion':
                 
                 for i, jugador in enumerate(titulares_visitante):
                     nombre = jugador.get('nombre', 'Sin nombre')
-                    numero = jugador.get('numero', '?')
-                    posicion = jugador.get('posicion', 'N/A')
+                    numero = jugador.get('numero') or jugador.get('dorsal') or '?'
+                    posicion = jugador.get('posicion') or jugador.get('position') or 'N/A'
                     imagen_url = jugador.get('imagen_url', '')
                     
                     # Verificar si es objetivo
@@ -1260,7 +1339,8 @@ elif st.session_state.modo_vista == 'observacion':
                             'numero': numero,
                             'partido_id': partido['id'],
                             'es_objetivo': es_objetivo,
-                            'datos_objetivo': datos_objetivo or {}
+                            'datos_objetivo': datos_objetivo or {},
+                            'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
                         }
                         st.rerun()
                 
@@ -1271,8 +1351,8 @@ elif st.session_state.modo_vista == 'observacion':
                     with st.expander(f"🔄 Suplentes ({len(suplentes_visitante)})", expanded=False):
                         for i, jugador in enumerate(suplentes_visitante):
                             nombre = jugador.get('nombre', 'Sin nombre')
-                            numero = jugador.get('numero', '?')
-                            posicion = jugador.get('posicion', 'N/A')
+                            numero = jugador.get('numero') or jugador.get('dorsal') or '?'
+                            posicion = jugador.get('posicion') or jugador.get('position') or 'N/A'
                             imagen_url = jugador.get('imagen_url', '')
                             
                             # Verificar si es objetivo
@@ -1296,8 +1376,8 @@ elif st.session_state.modo_vista == 'observacion':
                                     <strong style="margin-right: 8px;">{nombre}</strong>
                                     <span style="padding: 2px 6px; border-radius: 8px; font-size: 0.7em; background: #e9ecef; color: #495057;">{posicion}</span>
                                     {' <span style="margin-left: 8px;">🎯</span>' if es_objetivo else ""}
-                                </div
-                                """,unsafe_allow_html=True)
+                                </div>
+                                """, unsafe_allow_html=True)
                             
                             with cols_suplente[1]:
                                 # Botón simplificado sin número duplicado
@@ -1309,7 +1389,8 @@ elif st.session_state.modo_vista == 'observacion':
                                         'numero': numero,
                                         'partido_id': partido['id'],
                                         'es_objetivo': es_objetivo,
-                                        'datos_objetivo': datos_objetivo or {}
+                                        'datos_objetivo': datos_objetivo or {},
+                                        'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
                                     }
                                     st.rerun()
             
@@ -1392,9 +1473,12 @@ elif st.session_state.modo_vista == 'observacion':
             
             # Procesar envío del formulario
             if submitted or continuar:
+                print(f"DEBUG Formulario completo - submitted: {submitted}, continuar: {continuar}")
+                print(f"DEBUG - current_user: {current_user}")
+                print(f"DEBUG - partido_activo: {st.session_state.partido_activo}")
                 try:
                     informe_data = {
-                        'partido_id': player['partido_id'],
+                        'partido_id': st.session_state.partido_activo['id'],
                         'jugador_nombre': player['nombre'],
                         'equipo': player['equipo'],
                         'posicion': player['posicion'],
@@ -1407,8 +1491,9 @@ elif st.session_state.modo_vista == 'observacion':
                         'fortalezas': f"Evaluación completa. Nota: {nota_general}/10",
                         'debilidades': f"Por determinar en análisis detallado"
                     }
-                    
+                    print(f"DEBUG - informe_data completo: {informe_data}")
                     informe_id = partido_model.crear_informe_scouting(informe_data)
+                    print(f"DEBUG - Informe guardado con ID: {informe_id}")
                     
                     st.success(f"✅ **Informe guardado exitosamente!** (ID: {informe_id})")
                     st.success(f"🎯 **Jugador:** {player['nombre']} | **Nota:** {nota_general}/10 | **Recomendación:** {recomendacion}")

@@ -1,0 +1,6 @@
+Backup creado: 2025-07-06 16:37:22.278040
+Usuario: manue
+
+Estado del sistema antes del backup:
+Total informes: 22
+Jugadores observados: 6

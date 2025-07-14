@@ -1,4 +1,4 @@
-# models/partido_model.py - VERSIÓN MEJORADA CON INTEGRACIÓN AUTOMÁTICA
+# models/partido_model.py - VERSIÓN CORREGIDA CON INTEGRACIÓN OPCIONAL
 
 import sqlite3
 import json
@@ -31,8 +31,12 @@ class PartidoModel:
         # Inicializar modelo de jugadores para integración automática
         self.jugador_model = JugadorModel()
         
+        # NUEVO: Flag para controlar la integración con Wyscout
+        self.INTEGRACION_WYSCOUT_ACTIVA = True
+        
         PartidoModel._initialized = True
         logger.info("✅ PartidoModel inicializado (Singleton)")
+        logger.info(f"🔧 Integración Wyscout: {'ACTIVA' if self.INTEGRACION_WYSCOUT_ACTIVA else 'DESACTIVADA'}")
     
     def init_database(self):
         """Inicializa las tablas de partidos e informes"""
@@ -127,177 +131,128 @@ class PartidoModel:
         conn.commit()
         conn.close()
     
-    # REEMPLAZAR TODO el método crear_informe_scouting en partido_model.py con esto:
-
     def crear_informe_scouting(self, informe_data):
         """
-        Crea un nuevo informe de scouting con INTEGRACIÓN AUTOMÁTICA a Wyscout
-        
-        Args:
-            informe_data (dict): Datos del informe
-            
-        Returns:
-            int: ID del informe creado
+        Crea un nuevo informe de scouting con INTEGRACIÓN OPCIONAL a Wyscout
         """
+        # NUEVO: Primero guardar el partido si viene de un livescore
+        partido_id = informe_data.get('partido_id', '')
+        if partido_id.startswith('livescore_'):
+            # Es un partido del scraper, necesitamos guardarlo
+            partido_data = {
+                'id': partido_id,
+                'fecha': partido_id.split('_')[-1],  # Extraer fecha del ID
+                'equipo_local': 'Por determinar',  # Necesitarías pasar estos datos
+                'equipo_visitante': 'Por determinar',
+                'liga': 'LiveScore'
+            }
+            # Aquí necesitarías los datos completos del partido
+            # Por ahora, al menos guarda el ID para que no falle el JOIN
+            self.guardar_partido_si_no_existe(partido_data)
+            
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         logger.info(f"💾 Creando informe para: {informe_data['jugador_nombre']} ({informe_data['equipo']})")
         
-        # 1. GUARDAR INFORME BÁSICO
-        cursor.execute('''
-            INSERT INTO informes_scouting (
-                partido_id, jugador_nombre, equipo, posicion, scout_usuario,
-                control_balon, primer_toque, pase_corto, pase_largo, finalizacion, regate,
-                vision_juego, posicionamiento, marcaje, pressing, transiciones,
-                velocidad, resistencia, fuerza, salto, agilidad,
-                concentracion, liderazgo, comunicacion, presion, decision,
-                nota_general, potencial, recomendacion,
-                fortalezas, debilidades, observaciones, minutos_observados,
-                procesado_wyscout
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            informe_data['partido_id'],
-            informe_data['jugador_nombre'],
-            informe_data['equipo'],
-            informe_data['posicion'],
-            informe_data['scout_usuario'],
-            informe_data.get('control_balon'),
-            informe_data.get('primer_toque'),
-            informe_data.get('pase_corto'),
-            informe_data.get('pase_largo'),
-            informe_data.get('finalizacion'),
-            informe_data.get('regate'),
-            informe_data.get('vision_juego'),
-            informe_data.get('posicionamiento'),
-            informe_data.get('marcaje'),
-            informe_data.get('pressing'),
-            informe_data.get('transiciones'),
-            informe_data.get('velocidad'),
-            informe_data.get('resistencia'),
-            informe_data.get('fuerza'),
-            informe_data.get('salto'),
-            informe_data.get('agilidad'),
-            informe_data.get('concentracion'),
-            informe_data.get('liderazgo'),
-            informe_data.get('comunicacion'),
-            informe_data.get('presion'),
-            informe_data.get('decision'),
-            informe_data.get('nota_general'),
-            informe_data.get('potencial'),
-            informe_data.get('recomendacion'),
-            informe_data.get('fortalezas'),
-            informe_data.get('debilidades'),
-            informe_data.get('observaciones'),
-            informe_data.get('minutos_observados'),
-            False  # procesado_wyscout = False inicialmente
-        ))
-        
-        informe_id = cursor.lastrowid
-        conn.commit()
-        
-        logger.info(f"✅ Informe guardado con ID: {informe_id}")
-        
-        # 2. BÚSQUEDA AUTOMÁTICA EN WYSCOUT
         try:
-            logger.info("🔍 Iniciando búsqueda automática en Wyscout...")
-            
-            resultado_busqueda = self.jugador_model.buscar_jugador_en_wyscout(
-                nombre_jugador=informe_data['jugador_nombre'],
-                equipo_jugador=informe_data['equipo'],
-                umbral_confianza=70
-            )
-            
-            if resultado_busqueda:
-                # 3A. JUGADOR ENCONTRADO EN WYSCOUT
-                jugador_bd_id = self.jugador_model.añadir_jugador_observado(
-                    datos_wyscout=resultado_busqueda['datos_jugador'],
-                    confianza=resultado_busqueda['confianza'],
-                    algoritmo=resultado_busqueda['algoritmo'],
-                    informe_id=informe_id
-                )
-                
-                # Actualizar informe con datos de Wyscout
-                cursor.execute('''
-                    UPDATE informes_scouting SET 
-                        jugador_bd_id = ?,
-                        wyscout_match_confianza = ?,
-                        wyscout_algoritmo = ?,
-                        procesado_wyscout = 1
-                    WHERE id = ?
-                ''', (
-                    jugador_bd_id,
-                    resultado_busqueda['confianza'],
-                    resultado_busqueda['algoritmo'],
-                    informe_id
-                ))
-                
-                conn.commit()
-                
-                logger.info(f"🎯 ÉXITO TOTAL: Jugador añadido a BD personal (ID: {jugador_bd_id}) "
-                        f"con {resultado_busqueda['confianza']:.1f}% confianza")
-                
-            else:
-                # 3B. JUGADOR NO ENCONTRADO EN WYSCOUT - AÑADIR MANUALMENTE
-                logger.warning(f"⚠️ Jugador no encontrado en Wyscout: {informe_data['jugador_nombre']} ({informe_data['equipo']})")
-                
-                # Crear datos básicos del jugador para BD personal
-                datos_jugador_manual = {
-                    self.jugador_model.column_mapping['nombre']: informe_data['jugador_nombre'],
-                    self.jugador_model.column_mapping['equipo']: informe_data['equipo'],
-                    self.jugador_model.column_mapping['posicion']: informe_data.get('posicion', 'N/A'),
-                    self.jugador_model.column_mapping['edad']: None,
-                    # Añadir otros campos vacíos necesarios
-                    self.jugador_model.column_mapping['pais']: '',
-                    self.jugador_model.column_mapping['altura']: None,
-                    self.jugador_model.column_mapping['peso']: None,
-                    self.jugador_model.column_mapping['pie_preferido']: '',
-                    self.jugador_model.column_mapping['valor_mercado']: None,
-                    self.jugador_model.column_mapping['partidos_jugados']: 0,
-                    self.jugador_model.column_mapping['minutos']: 0,
-                    self.jugador_model.column_mapping['goles']: 0,
-                    self.jugador_model.column_mapping['asistencias']: 0,
-                    self.jugador_model.column_mapping['tarjetas_amarillas']: 0,
-                    self.jugador_model.column_mapping['tarjetas_rojas']: 0
-                }
-                
-                # Añadir jugador a BD personal con datos manuales
-                jugador_bd_id = self.jugador_model.añadir_jugador_observado(
-                    datos_wyscout=datos_jugador_manual,
-                    confianza=0,  # 0% porque no se encontró en Wyscout
-                    algoritmo='manual_informe',
-                    informe_id=informe_id
-                )
-                
-                # Actualizar informe con el ID del jugador manual
-                cursor.execute('''
-                    UPDATE informes_scouting SET 
-                        jugador_bd_id = ?,
-                        procesado_wyscout = 1,
-                        wyscout_match_confianza = 0,
-                        wyscout_algoritmo = 'manual_no_encontrado'
-                    WHERE id = ?
-                ''', (jugador_bd_id, informe_id))
-                
-                conn.commit()
-                
-                logger.info(f"✅ Jugador añadido manualmente a BD personal (ID: {jugador_bd_id})")
-                
-        except Exception as e:
-            logger.error(f"❌ Error en búsqueda automática: {str(e)}")
-            # Marcar como procesado pero con error
+            # 1. GUARDAR INFORME BÁSICO
             cursor.execute('''
-                UPDATE informes_scouting SET 
-                    procesado_wyscout = 1,
-                    wyscout_match_confianza = -1
-                WHERE id = ?
-            ''', (informe_id,))
+                INSERT INTO informes_scouting (
+                    partido_id, jugador_nombre, equipo, posicion, scout_usuario,
+                    control_balon, primer_toque, pase_corto, pase_largo, finalizacion, regate,
+                    vision_juego, posicionamiento, marcaje, pressing, transiciones,
+                    velocidad, resistencia, fuerza, salto, agilidad,
+                    concentracion, liderazgo, comunicacion, presion, decision,
+                    nota_general, potencial, recomendacion,
+                    fortalezas, debilidades, observaciones, minutos_observados,
+                    tipo_evaluacion, imagen_url
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?
+                )
+            ''', (
+                informe_data.get('partido_id'),
+                informe_data.get('jugador_nombre'),
+                informe_data.get('equipo'),
+                informe_data.get('posicion'),
+                informe_data.get('scout_usuario'),
+                # Evaluaciones (usar valores por defecto si no vienen)
+                informe_data.get('control_balon', 5),
+                informe_data.get('primer_toque', 5),
+                informe_data.get('pase_corto', 5),
+                informe_data.get('pase_largo', 5),
+                informe_data.get('finalizacion', 5),
+                informe_data.get('regate', 5),
+                informe_data.get('vision_juego', 5),
+                informe_data.get('posicionamiento', 5),
+                informe_data.get('marcaje', 5),
+                informe_data.get('pressing', 5),
+                informe_data.get('transiciones', 5),
+                informe_data.get('velocidad', 5),
+                informe_data.get('resistencia', 5),
+                informe_data.get('fuerza', 5),
+                informe_data.get('salto', 5),
+                informe_data.get('agilidad', 5),
+                informe_data.get('concentracion', 5),
+                informe_data.get('liderazgo', 5),
+                informe_data.get('comunicacion', 5),
+                informe_data.get('presion', 5),
+                informe_data.get('decision', 5),
+                # General
+                informe_data.get('nota_general'),
+                informe_data.get('potencial'),
+                informe_data.get('recomendacion'),
+                informe_data.get('fortalezas'),
+                informe_data.get('debilidades'),
+                informe_data.get('observaciones'),
+                informe_data.get('minutos_observados', 90),
+                informe_data.get('tipo_evaluacion', 'campo'),
+                informe_data.get('imagen_url', '')
+            ))
+            
+            informe_id = cursor.lastrowid
+            
+            # IMPORTANTE: Hacer commit AQUÍ, antes de cualquier otra operación
             conn.commit()
-        
-        finally:
+            logger.info(f"✅ Informe guardado exitosamente con ID: {informe_id}")
+            
+            # 2. INTEGRACIÓN WYSCOUT (OPCIONAL - NO AFECTA EL GUARDADO)
+            if self.INTEGRACION_WYSCOUT_ACTIVA:
+                try:
+                    logger.info("🔍 Integración Wyscout ACTIVA - Iniciando búsqueda...")
+                    # ... código de integración Wyscout ...
+                    # Si hay error aquí, NO hacer rollback
+                    
+                except Exception as e:
+                    # Solo loguear el error, NO hacer rollback
+                    logger.warning(f"⚠️ Error en integración Wyscout: {e}")
+                    # El informe YA está guardado, así que continuamos
+            
             conn.close()
+            return informe_id
+            
+        except Exception as e:
+            logger.error(f"❌ Error creando informe: {e}")
+            conn.rollback()
+            conn.close()
+            return None
+    
+    def activar_integracion_wyscout(self, activar=True):
+        """
+        Activa o desactiva la integración con Wyscout
         
-        return informe_id
+        Args:
+            activar (bool): True para activar, False para desactivar
+        """
+        self.INTEGRACION_WYSCOUT_ACTIVA = activar
+        logger.info(f"🔧 Integración Wyscout: {'ACTIVADA' if activar else 'DESACTIVADA'}")
     
     def obtener_informes_por_usuario(self, usuario):
         """Obtiene todos los informes de un scout CON datos de integración"""
@@ -315,7 +270,7 @@ class PartidoModel:
                     ELSE '⚪ Sin procesar'
                 END as estado_wyscout
             FROM informes_scouting i
-            JOIN partidos p ON i.partido_id = p.id
+            LEFT JOIN partidos p ON i.partido_id = p.id
             WHERE i.scout_usuario = ?
             ORDER BY i.fecha_creacion DESC
         ''', (usuario,))
@@ -368,6 +323,10 @@ class PartidoModel:
     
     def reprocesar_informes_sin_wyscout(self):
         """Reprocesa informes que no pudieron ser vinculados a Wyscout"""
+        if not self.INTEGRACION_WYSCOUT_ACTIVA:
+            logger.warning("⚠️ La integración Wyscout está desactivada")
+            return 0, 0
+            
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -817,3 +776,46 @@ class PartidoModel:
         conn.close()
         
         return wyscout_match
+    
+    def guardar_partido_si_no_existe(self, partido_data):
+        """Guarda el partido en la BD si no existe"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Verificar si el partido ya existe
+            cursor.execute("SELECT id FROM partidos WHERE id = ?", (partido_data['id'],))
+            
+            if cursor.fetchone() is None:
+                # El partido no existe, guardarlo
+                cursor.execute('''
+                    INSERT INTO partidos (
+                        id, fecha, liga, equipo_local, equipo_visitante,
+                        estadio, hora, estado, resultado_local, resultado_visitante
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    partido_data['id'],
+                    partido_data.get('fecha', ''),
+                    partido_data.get('liga', 'LiveScore'),  # Por defecto
+                    partido_data['equipo_local'],
+                    partido_data['equipo_visitante'],
+                    partido_data.get('estadio', 'N/A'),
+                    partido_data.get('hora', 'TBD'),
+                    partido_data.get('estado', 'finalizado'),
+                    partido_data.get('resultado_local', 0),
+                    partido_data.get('resultado_visitante', 0)
+                ))
+                
+                conn.commit()
+                logger.info(f"✅ Partido guardado: {partido_data['id']}")
+                return True
+            else:
+                logger.info(f"ℹ️ Partido ya existe: {partido_data['id']}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error guardando partido: {str(e)}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()

@@ -73,10 +73,8 @@ class WyscoutModel:
         return self._df, self._detected_columns
     
     def get_all_players(self):
-        """Obtiene todos los jugadores - con cache automático"""
-        if self._df is None or self._df.empty:
-            self.load_data()
-        return self._df
+        """Lee directamente del Excel cada vez"""
+        return pd.read_excel('data\wyscout_LaLiga_limpio.xlsx')
     
     def get_detected_columns(self):
         """Obtiene el mapeo de columnas detectadas"""
