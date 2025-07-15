@@ -1,246 +1,181 @@
 # utils/wyscout_data_extractor_personalizado.py
 
 import pandas as pd
-import os
-import logging
+import numpy as np
 from difflib import SequenceMatcher
+import os
+import unicodedata
 
 class WyscoutExtractorPersonalizado:
-    """
-    Extractor especializado para tu archivo wyscout_LaLiga_limpio.xlsx
-    """
+    def __init__(self):
+        """Inicializa el extractor con los datos de Wyscout"""
+        self.df = None
+        self.cargar_datos()
     
-    def __init__(self, xlsx_path="data/wyscout_LaLiga_limpio.xlsx"):
-        self.xlsx_path = xlsx_path
-        self.df_wyscout = None
-        self.logger = logging.getLogger(__name__)
-        self._cargar_datos()
-    
-    def _cargar_datos(self):
-        """Carga los datos del archivo xlsx de Wyscout"""
+    def cargar_datos(self):
+        """Carga los datos desde el Excel de Wyscout"""
         try:
-            if os.path.exists(self.xlsx_path):
-                self.df_wyscout = pd.read_excel(self.xlsx_path, sheet_name=0)
-                print(f"✅ Datos Wyscout cargados: {len(self.df_wyscout)} jugadores con {len(self.df_wyscout.columns)} métricas")
+            # Buscar el archivo en diferentes rutas posibles
+            rutas_posibles = [
+                'data/wyscout_LaLiga_limpio.xlsx',
+                '../data/wyscout_LaLiga_limpio.xlsx',
+                '../../data/wyscout_LaLiga_limpio.xlsx',
+                os.path.join(os.path.dirname(__file__), '../data/wyscout_LaLiga_limpio.xlsx')
+            ]
+            
+            for ruta in rutas_posibles:
+                if os.path.exists(ruta):
+                    self.df = pd.read_excel(ruta)
+                    print(f"✅ Datos Wyscout cargados: {len(self.df)} jugadores con {len(self.df.columns)} métricas")
+                    return
+            
+            print("❌ No se encontró el archivo de datos Wyscout")
+            self.df = pd.DataFrame()
+            
+        except Exception as e:
+            print(f"❌ Error cargando datos Wyscout: {e}")
+            self.df = pd.DataFrame()
+    
+    def normalizar_texto(self, texto):
+        """Normaliza texto para comparación (quita acentos, minúsculas, etc)"""
+        if not texto:
+            return ""
+        
+        # Convertir a string si no lo es
+        texto = str(texto)
+        
+        # Quitar acentos
+        texto = ''.join(c for c in unicodedata.normalize('NFD', texto) 
+                       if unicodedata.category(c) != 'Mn')
+        
+        # Minúsculas y quitar espacios extra
+        texto = texto.lower().strip()
+        
+        # Quitar caracteres especiales comunes
+        texto = texto.replace("'", "").replace("-", " ").replace(".", "")
+        
+        return texto
+    
+    def calcular_similitud_compuesta(self, nombre1, equipo1, nombre2, equipo2):
+        """
+        Calcula similitud considerando TANTO nombre COMO equipo
+        Retorna un score entre 0 y 1
+        """
+        # Normalizar todos los textos
+        nombre1_norm = self.normalizar_texto(nombre1)
+        nombre2_norm = self.normalizar_texto(nombre2)
+        equipo1_norm = self.normalizar_texto(equipo1)
+        equipo2_norm = self.normalizar_texto(equipo2)
+        
+        # Similitud del nombre (peso 70%)
+        sim_nombre = SequenceMatcher(None, nombre1_norm, nombre2_norm).ratio()
+        
+        # Similitud del equipo (peso 30%)
+        sim_equipo = SequenceMatcher(None, equipo1_norm, equipo2_norm).ratio()
+        
+        # Si los equipos no coinciden en absoluto, penalizar fuertemente
+        if sim_equipo < 0.5:
+            return sim_nombre * 0.3  # Reducir drásticamente el score
+        
+        # Score compuesto
+        score_total = (sim_nombre * 0.7) + (sim_equipo * 0.3)
+        
+        return score_total
+    
+    def buscar_jugador_mejorado(self, nombre_buscar, equipo_buscar=None, umbral_minimo=0.85):
+        """
+        Busca jugador con matching mejorado de nombre + equipo
+        
+        Args:
+            nombre_buscar: Nombre del jugador
+            equipo_buscar: Equipo del jugador (opcional pero recomendado)
+            umbral_minimo: Similitud mínima requerida (default 0.85)
+        
+        Returns:
+            dict con datos del jugador o None si no hay match suficiente
+        """
+        if self.df is None or self.df.empty:
+            print("❌ No hay datos de Wyscout cargados")
+            return None
+        
+        print(f"🔍 Buscando '{nombre_buscar}' del '{equipo_buscar}' en base de datos Wyscout...")
+        
+        mejor_match = None
+        mejor_score = 0
+        
+        # Columnas de nombre y equipo en el dataset
+        col_nombre = 'jugador' if 'jugador' in self.df.columns else self.df.columns[0]
+        col_equipo = 'equipo_durante_el_período_seleccionado' if 'equipo_durante_el_período_seleccionado' in self.df.columns else 'equipo'
+        
+        for idx, row in self.df.iterrows():
+            nombre_wyscout = row[col_nombre]
+            equipo_wyscout = row[col_equipo] if col_equipo in self.df.columns else None
+            
+            if equipo_buscar and equipo_wyscout:
+                # Matching compuesto (nombre + equipo)
+                score = self.calcular_similitud_compuesta(
+                    nombre_buscar, equipo_buscar,
+                    nombre_wyscout, equipo_wyscout
+                )
             else:
-                print(f"❌ No se encontró el archivo: {self.xlsx_path}")
-                self.df_wyscout = pd.DataFrame()
-        except Exception as e:
-            print(f"❌ Error cargando datos Wyscout: {str(e)}")
-            self.df_wyscout = pd.DataFrame()
-    
-    def buscar_jugador(self, nombre_jugador, equipo=None, threshold_similarity=0.6):
-        """
-        Busca un jugador en los datos de Wyscout con fuzzy matching
-        """
-        if self.df_wyscout.empty:
-            print("❌ No hay datos cargados")
-            return None
+                # Solo matching de nombre si no hay equipo
+                score = SequenceMatcher(None, 
+                                      self.normalizar_texto(nombre_buscar), 
+                                      self.normalizar_texto(nombre_wyscout)).ratio()
+            
+            if score > mejor_score:
+                mejor_score = score
+                mejor_match = row
         
-        try:
-            def similarity(a, b):
-                return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-            
-            # Buscar coincidencias en la columna 'jugador'
-            mejores_matches = []
-            
-            for idx, row in self.df_wyscout.iterrows():
-                nombre_wyscout = str(row['jugador']).strip()
-                sim_score = similarity(nombre_jugador, nombre_wyscout)
-                
-                # Si también tenemos equipo, considerarlo
-                if equipo and pd.notna(row['equipo']):
-                    equipo_wyscout = str(row['equipo']).strip()
-                    equipo_sim = similarity(equipo, equipo_wyscout)
-                    # Promedio ponderado: 70% nombre, 30% equipo
-                    sim_score = (sim_score * 0.7) + (equipo_sim * 0.3)
-                
-                if sim_score >= threshold_similarity:
-                    mejores_matches.append((idx, sim_score, row))
-            
-            # Ordenar por similitud y devolver el mejor
-            if mejores_matches:
-                mejores_matches.sort(key=lambda x: x[1], reverse=True)
-                _, score, jugador_data = mejores_matches[0]
-                
-                print(f"✅ Jugador encontrado: {jugador_data['jugador']} ({jugador_data['equipo']}) - Similitud: {score:.2f}")
-                return jugador_data
-            else:
-                print(f"❌ No se encontró '{nombre_jugador}' en datos Wyscout")
-                
-                # Sugerir nombres similares
-                todos_nombres = self.df_wyscout['jugador'].tolist()
-                from difflib import get_close_matches
-                similares = get_close_matches(nombre_jugador, todos_nombres, n=3, cutoff=0.4)
-                
-                if similares:
-                    print(f"💡 Nombres similares: {', '.join(similares)}")
-                
-                return None
-                
-        except Exception as e:
-            print(f"❌ Error buscando jugador: {str(e)}")
+        # Validar si el match es suficientemente bueno
+        if mejor_score >= umbral_minimo:
+            print(f"✅ Jugador encontrado: {mejor_match[col_nombre]} ({mejor_match[col_equipo] if col_equipo in mejor_match else 'N/A'}) - Similitud: {mejor_score:.2f}")
+            return mejor_match
+        else:
+            print(f"❌ No se encontró match suficiente. Mejor score: {mejor_score:.2f} < {umbral_minimo}")
+            if mejor_match is not None and mejor_score > 0.5:
+                print(f"   Mejor candidato descartado: {mejor_match[col_nombre]} ({mejor_match[col_equipo] if col_equipo in mejor_match else 'N/A'})")
             return None
     
-    def extraer_datos_radar(self, jugador_data):
+    def obtener_datos_completos_jugador(self, nombre_jugador, equipo_jugador=None):
         """
-        VERSIÓN CORREGIDA: Extrae datos específicos para el radar chart
+        Obtiene datos completos del jugador con validación estricta
         """
-        if jugador_data is None:
+        # Buscar con umbral alto
+        jugador = self.buscar_jugador_mejorado(nombre_jugador, equipo_jugador, umbral_minimo=0.85)
+        
+        if jugador is None:
             return None
         
-        try:
-            def safe_get(column_name, default=0):
-                """Obtiene valor de forma segura"""
-                valor = jugador_data.get(column_name, default)
-                
-                if pd.isna(valor) or valor == '-' or valor == '':
-                    return default
-                
-                if isinstance(valor, bool):
-                    return 1 if valor else 0
-                
-                if isinstance(valor, (int, float)):
-                    if column_name.startswith('%') and valor <= 1:
-                        return valor * 100
-                    return float(valor)
-                
-                if isinstance(valor, str):
-                    try:
-                        return float(valor.replace('%', '').replace(',', ''))
-                    except:
-                        return default
-                
-                try:
-                    return float(valor)
-                except:
-                    return default
+        # Extraer métricas relevantes
+        datos = {
+            'nombre': jugador.get('jugador', nombre_jugador),
+            'equipo': jugador.get('equipo_durante_el_período_seleccionado', equipo_jugador),
+            'posicion': jugador.get('pos_principal', 'N/A'),
+            'edad': jugador.get('edad', 'N/A'),
+            'partidos_jugados': jugador.get('partidos_jugados', 0),
+            'minutos_jugados': jugador.get('minutos_jugados', 0),
             
-            # Datos básicos
-            partidos = safe_get('partidos_jugados', 1)
-            minutos_totales = safe_get('min', 90)
-            
-            # Extraer métricas para radar
-            datos_extraidos = {
-                'precision_pases': safe_get('%precisión_pases,_', 75),
-                'duelos_ganados_pct': safe_get('%duelos_ganados,_', 50),
-                'duelos_aereos_pct': safe_get('%duelos_aéreos_ganados,_', 50),
-                'goles': safe_get('goles/90', 0),
-                'asistencias': safe_get('asistencias/90', 0),
-                'xg': safe_get('xg/90', 0),
-                'regates_completados': safe_get('regates/90', 0),
-                'interceptaciones': safe_get('intercep/90', 0),
-                'partidos_jugados': partidos,
-                'minutos_jugados': minutos_totales,
-                'equipo': str(jugador_data.get('equipo', 'N/A')),
-                'posicion': str(jugador_data.get('pos_principal', 'N/A')),
-                'edad': safe_get('edad', 0)
-            }
-            
-            # Validar datos
-            metricas_principales = ['precision_pases', 'duelos_ganados_pct', 'goles', 'asistencias']
-            if all(datos_extraidos[m] == 0 for m in metricas_principales):
-                print("⚠️ No se pudieron extraer datos válidos")
-                return None
-            
-            print("📊 Datos extraídos para radar:")
-            for key, value in datos_extraidos.items():
-                if key in metricas_principales + ['duelos_aereos_pct', 'xg', 'regates_completados', 'interceptaciones']:
-                    print(f"   • {key}: {value}")
-            
-            return datos_extraidos
-            
-        except Exception as e:
-            print(f"❌ Error extrayendo datos: {str(e)}")
-            return None
+            # Métricas para radar
+            'precision_pases': jugador.get('precisión_de_pases,_%', 75),
+            'duelos_ganados_pct': jugador.get('duelos_ganados,_%', 50),
+            'duelos_aereos_pct': jugador.get('duelos_aéreos_ganados,_%', 50),
+            'goles': jugador.get('goles', 0) / max(jugador.get('partidos_jugados', 1), 1),  # Por partido
+            'asistencias': jugador.get('asistencias', 0) / max(jugador.get('partidos_jugados', 1), 1),  # Por partido
+            'xg': jugador.get('xg', 0) / max(jugador.get('partidos_jugados', 1), 1),  # Por partido
+            'regates_completados': jugador.get('regates_completados_por_90', jugador.get('regates_completados', 0)),
+            'interceptaciones': jugador.get('intercepciones_por_90', jugador.get('intercepciones', 0))
+        }
+        
+        print(f"📊 Datos extraídos para radar:")
+        for key in ['precision_pases', 'duelos_ganados_pct', 'duelos_aereos_pct', 'goles', 'asistencias', 'xg', 'regates_completados', 'interceptaciones']:
+            print(f"   • {key}: {datos[key]}")
+        
+        return datos
     
-    def obtener_datos_completos_jugador(self, nombre_jugador, equipo=None):
+    def validar_jugador_equipo(self, nombre_jugador, equipo_jugador):
         """
-        Método principal: busca jugador y extrae datos para radar
+        Valida si un jugador pertenece a un equipo específico
         """
-        print(f"🔍 Buscando '{nombre_jugador}' en base de datos Wyscout...")
-        
-        # Buscar jugador
-        jugador_data = self.buscar_jugador(nombre_jugador, equipo)
-        
-        if jugador_data is None:
-            return None
-        
-        # Extraer datos para radar
-        datos_radar = self.extraer_datos_radar(jugador_data)
-        
-        return datos_radar
-    
-    def obtener_jugadores_por_equipo(self, equipo):
-        """
-        Obtiene todos los jugadores de un equipo específico
-        """
-        if self.df_wyscout.empty:
-            return []
-        
-        try:
-            jugadores = self.df_wyscout[self.df_wyscout['equipo'].str.contains(equipo, case=False, na=False)]
-            return jugadores['jugador'].tolist()
-        except Exception as e:
-            print(f"❌ Error obteniendo jugadores del equipo {equipo}: {str(e)}")
-            return []
-    
-    def obtener_top_jugadores_por_metrica(self, metrica, top_n=10):
-        """
-        Obtiene los mejores jugadores según una métrica específica
-        """
-        if self.df_wyscout.empty:
-            return []
-        
-        try:
-            # Mapeo de métricas comunes
-            metrica_mapping = {
-                'goles': 'goles/90',
-                'asistencias': 'asistencias/90',
-                'pases': '%precisión_pases,_',
-                'regates': 'regates/90',
-                'duelos': '%duelos_ganados,_'
-            }
-            
-            col_name = metrica_mapping.get(metrica, metrica)
-            
-            if col_name in self.df_wyscout.columns:
-                top_players = self.df_wyscout.nlargest(top_n, col_name)
-                return [(row['jugador'], row['equipo'], row[col_name]) for _, row in top_players.iterrows()]
-            else:
-                print(f"❌ Métrica '{metrica}' no encontrada")
-                return []
-                
-        except Exception as e:
-            print(f"❌ Error obteniendo top jugadores: {str(e)}")
-            return []
-    
-    def debug_jugador_especifico(self, nombre_jugador):
-        """
-        Debug completo de un jugador específico
-        """
-        print(f"\n🔍 DEBUG COMPLETO PARA: {nombre_jugador}")
-        print("=" * 50)
-        
-        jugador_data = self.buscar_jugador(nombre_jugador)
-        
-        if jugador_data is not None:
-            print(f"✅ JUGADOR ENCONTRADO: {jugador_data['jugador']}")
-            print(f"🏟️ Equipo: {jugador_data['equipo']}")
-            print(f"📍 Posición: {jugador_data['pos_principal']}")
-            print(f"👤 Edad: {jugador_data['edad']} años")
-            print(f"⚽ Partidos: {jugador_data['partidos_jugados']}")
-            print(f"⏱️ Minutos: {jugador_data['min']}")
-            print(f"🥅 Goles/90: {jugador_data['goles/90']}")
-            print(f"🎯 Asistencias/90: {jugador_data['asistencias/90']}")
-            print(f"📊 Precisión pases: {jugador_data['%precisión_pases,_'] * 100:.1f}%")
-            print(f"🤼 Duelos ganados: {jugador_data['%duelos_ganados,_'] * 100:.1f}%")
-            
-            # Extraer datos del radar
-            datos_radar = self.extraer_datos_radar(jugador_data)
-            if datos_radar:
-                print(f"\n📊 DATOS PARA RADAR EXTRAÍDOS EXITOSAMENTE")
-            else:
-                print(f"\n❌ ERROR EXTRAYENDO DATOS PARA RADAR")
-        
-        return jugador_data
+        jugador = self.buscar_jugador_mejorado(nombre_jugador, equipo_jugador, umbral_minimo=0.9)
+        return jugador is not None

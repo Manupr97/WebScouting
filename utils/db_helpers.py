@@ -3,6 +3,32 @@ import sqlite3
 import json
 from datetime import datetime
 from models.partido_model import PartidoModel
+import time
+
+def ejecutar_con_reintentos(conn, query, params=None, max_reintentos=5):
+    """
+    Ejecuta una query con reintentos en caso de database lock
+    """
+    for intento in range(max_reintentos):
+        try:
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            conn.commit()
+            return cursor
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e):
+                if intento < max_reintentos - 1:
+                    print(f"⚠️ Base de datos bloqueada, reintentando en {0.5 * (intento + 1)} segundos...")
+                    time.sleep(0.5 * (intento + 1))  # Espera incremental
+                    continue
+                else:
+                    print(f"❌ Error después de {max_reintentos} intentos: {e}")
+                    raise
+            else:
+                raise
 
 def crear_informe_scouting(informe_data):
     """
@@ -60,7 +86,8 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
         scout_usuario: usuario que está haciendo scouting
     """
     try:
-        conn = sqlite3.connect('data/jugadores.db')
+        conn = sqlite3.connect('data/jugadores.db', timeout=20.0)
+        conn.execute("PRAGMA busy_timeout = 10000")  # 10 segundos
         cursor = conn.cursor()
         
         # Verificar si el jugador ya existe
@@ -89,8 +116,8 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                 'fue_titular': jugador_data.get('es_titular', True)
             })
             
-            # Actualizar registro
-            cursor.execute("""
+            # Actualizar registro con reintentos
+            update_query = """
                 UPDATE jugadores_observados
                 SET numero_camiseta = COALESCE(?, numero_camiseta),
                     imagen_url = ?,
@@ -102,7 +129,9 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                     datos_json = ?,
                     posicion = COALESCE(?, posicion)
                 WHERE id = ?
-            """, (
+            """
+            
+            params = (
                 jugador_data.get('numero', ''),
                 jugador_data.get('imagen_url', ''),
                 partido_data.get('escudo_equipo', ''),
@@ -112,7 +141,9 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                 json.dumps(datos_adicionales),
                 jugador_data.get('posicion', ''),
                 jugador_id
-            ))
+            )
+            
+            ejecutar_con_reintentos(conn, update_query, params)
             
             print(f"✅ Actualizado: {jugador_data['nombre']} (observado {veces_observado + 1} veces)")
             
@@ -127,7 +158,7 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                 'origen': 'scraper_alineaciones'
             }
             
-            cursor.execute("""
+            insert_query = """
                 INSERT INTO jugadores_observados (
                     jugador, equipo, posicion, numero_camiseta,
                     imagen_url, escudo_equipo, ultimo_partido_id,
@@ -135,7 +166,9 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                     datos_json, fecha_agregado, estado, veces_observado,
                     nombre_completo, nota_general
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+            """
+            
+            params = (
                 jugador_data['nombre'],
                 partido_data['equipo'],
                 jugador_data.get('posicion', 'Por determinar'),
@@ -152,11 +185,12 @@ def actualizar_jugador_desde_scraper(jugador_data, partido_data, scout_usuario):
                 1,
                 jugador_data['nombre'],  # nombre_completo
                 0  # nota_general inicial
-            ))
+            )
+            
+            ejecutar_con_reintentos(conn, insert_query, params)
             
             print(f"✅ Nuevo jugador: {jugador_data['nombre']} ({partido_data['equipo']})")
         
-        conn.commit()
         conn.close()
         return True
         
@@ -202,10 +236,11 @@ def procesar_alineaciones_completas(partido_data, alineacion_local, alineacion_v
 
 def actualizar_estadisticas_desde_informes(nombre_jugador, equipo):
     """
-    Actualiza las estadísticas de un jugador basándose en todos sus informes
+    VERSIÓN CORREGIDA: Actualiza las estadísticas con promedio ponderado
     """
     try:
-        conn = sqlite3.connect('data/jugadores.db')
+        conn = sqlite3.connect('data/jugadores.db', timeout=20.0)
+        conn.execute("PRAGMA busy_timeout = 10000")
         cursor = conn.cursor()
         
         # Primero verificar que el jugador existe
@@ -219,62 +254,80 @@ def actualizar_estadisticas_desde_informes(nombre_jugador, equipo):
             print(f"⚠️ Jugador {nombre_jugador} no encontrado en Base Personal")
             return False
         
-        # CORREGIDO: Usar la tabla correcta y la base de datos correcta
-        conn_partidos = sqlite3.connect('data/partidos.db')
+        jugador_id = jugador[0]
+        
+        # Conectar a partidos.db para obtener informes
+        conn_partidos = sqlite3.connect('data/partidos.db', timeout=20.0)
+        conn_partidos.execute("PRAGMA busy_timeout = 10000")
         cursor_partidos = conn_partidos.cursor()
         
-        # Calcular estadísticas desde la tabla informes_scouting en partidos.db
+        # Obtener TODOS los informes con sus tipos para calcular promedio ponderado
         cursor_partidos.execute("""
             SELECT 
-                AVG(CAST(nota_general AS REAL)) as promedio,
-                MAX(CAST(nota_general AS REAL)) as mejor,
-                MIN(CAST(nota_general AS REAL)) as peor,
-                COUNT(*) as total,
-                GROUP_CONCAT(recomendacion) as recomendaciones
+                nota_general,
+                tipo_evaluacion,
+                recomendacion
             FROM informes_scouting
             WHERE jugador_nombre = ? AND equipo = ?
         """, (nombre_jugador, equipo))
         
-        stats = cursor_partidos.fetchone()
+        informes = cursor_partidos.fetchall()
         conn_partidos.close()
         
-        if stats and stats[0] is not None:  # Si hay estadísticas
-            promedio, mejor, peor, total, recomendaciones = stats
+        if informes:
+            # Calcular promedio ponderado
+            notas = []
+            pesos = []
+            recomendaciones = []
             
-            # Determinar recomendación final basada en las recomendaciones
-            if recomendaciones:
-                rec_list = recomendaciones.split(',')
-                if rec_list.count('fichar') >= total/2:
+            for nota, tipo, recomendacion in informes:
+                if nota and nota > 0:
+                    # Ponderar más los análisis completos
+                    peso = 2.0 if tipo == 'video_completo' else 1.0
+                    notas.append(float(nota))
+                    pesos.append(peso)
+                    recomendaciones.append(recomendacion)
+            
+            if notas:
+                # Promedio ponderado
+                total_peso = sum(pesos)
+                promedio = sum(n * p for n, p in zip(notas, pesos)) / total_peso
+                mejor = max(notas)
+                peor = min(notas)
+                total = len(informes)
+                
+                # Determinar recomendación final
+                if recomendaciones.count('fichar') >= total/2:
                     recomendacion_final = 'fichar'
-                elif rec_list.count('descartar') >= total/2:
+                elif recomendaciones.count('descartar') >= total/2:
                     recomendacion_final = 'descartar'
                 else:
                     recomendacion_final = 'seguir_observando'
-            else:
-                recomendacion_final = 'seguir_observando'
-            
-            # Actualizar jugador con las estadísticas
-            cursor.execute("""
-                UPDATE jugadores_observados
-                SET nota_promedio = ?,
-                    mejor_nota = ?,
-                    peor_nota = ?,
-                    total_informes = ?,
-                    nota_general = ?
-                WHERE jugador = ? AND equipo = ?
-            """, (
-                round(promedio, 1),
-                mejor,
-                peor,
-                total,
-                round(promedio, 0),  # nota_general como entero
-                nombre_jugador,
-                equipo
-            ))
-            
-            conn.commit()
-            print(f"✅ Estadísticas actualizadas para {nombre_jugador}: Promedio {promedio:.1f}, Total informes: {total}")
-            
+                
+                # Actualizar jugador con reintentos
+                update_query = """
+                    UPDATE jugadores_observados
+                    SET nota_promedio = ?,
+                        mejor_nota = ?,
+                        peor_nota = ?,
+                        total_informes = ?,
+                        nota_general = ?
+                    WHERE id = ?
+                """
+                
+                params = (
+                    round(promedio, 1),
+                    mejor,
+                    peor,
+                    total,
+                    round(promedio, 0),  # nota_general como entero
+                    jugador_id
+                )
+                
+                ejecutar_con_reintentos(conn, update_query, params)
+                
+                print(f"✅ Estadísticas actualizadas para {nombre_jugador}: Promedio {promedio:.1f} (ponderado), Total informes: {total}")
+        
         conn.close()
         return True
         
@@ -296,7 +349,8 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
         informe_id: ID del informe recién creado
     """
     try:
-        conn = sqlite3.connect('data/jugadores.db')
+        conn = sqlite3.connect('data/jugadores.db', timeout=20.0)
+        conn.execute("PRAGMA busy_timeout = 10000")
         cursor = conn.cursor()
         
         # Verificar si el jugador ya existe
@@ -333,8 +387,8 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
             nuevo_veces_observado = veces_observado + 1
             nuevo_total_informes = (total_informes or 0) + 1
             
-            # Actualizar registro
-            cursor.execute("""
+            # Actualizar registro con reintentos
+            update_query = """
                 UPDATE jugadores_observados
                 SET numero_camiseta = COALESCE(NULLIF(?, ''), numero_camiseta),
                     imagen_url = COALESCE(NULLIF(?, ''), imagen_url),
@@ -348,7 +402,9 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                     posicion = COALESCE(NULLIF(?, ''), posicion),
                     scout_agregado = COALESCE(scout_agregado, ?)
                 WHERE id = ?
-            """, (
+            """
+            
+            params = (
                 jugador_data.get('numero', ''),
                 jugador_data.get('imagen_url', ''),
                 partido_data.get('escudo_equipo', ''),
@@ -361,7 +417,9 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                 jugador_data.get('posicion', ''),
                 scout_usuario,
                 jugador_id
-            ))
+            )
+            
+            ejecutar_con_reintentos(conn, update_query, params)
             
             print(f"✅ Jugador actualizado: {jugador_data['nombre']} - Informe #{nuevo_total_informes}")
             
@@ -384,7 +442,7 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
             # Determinar liga del partido
             liga = partido_data.get('competicion', 'Desconocida')
             
-            cursor.execute("""
+            insert_query = """
                 INSERT INTO jugadores_observados (
                     jugador, equipo, posicion, numero_camiseta,
                     imagen_url, escudo_equipo, ultimo_partido_id,
@@ -392,7 +450,9 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                     datos_json, fecha_agregado, estado, veces_observado,
                     nombre_completo, nota_general, total_informes, liga
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+            """
+            
+            params = (
                 jugador_data['nombre'],
                 partido_data['equipo'],
                 jugador_data.get('posicion', 'Por determinar'),
@@ -411,15 +471,16 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                 partido_data.get('nota_evaluacion', 0),  # nota_general inicial
                 1,  # Primer informe
                 liga
-            ))
+            )
+            
+            ejecutar_con_reintentos(conn, insert_query, params)
             
             print(f"✅ Nuevo jugador añadido desde informe: {jugador_data['nombre']} ({partido_data['equipo']})")
         
-        # Actualizar estadísticas del jugador
+        # IMPORTANTE: Actualizar estadísticas del jugador SIEMPRE
+        conn.close()  # Cerrar antes de llamar a actualizar_estadisticas
         actualizar_estadisticas_desde_informes(jugador_data['nombre'], partido_data['equipo'])
         
-        conn.commit()
-        conn.close()
         return True
         
     except Exception as e:

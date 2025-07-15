@@ -900,6 +900,7 @@ EVENTOS DESTACADOS:
         import traceback
         traceback.print_exc()
         return False
+    
 
 def limpiar_estados_evaluacion():
     """Limpia los estados temporales después de guardar"""
@@ -912,6 +913,940 @@ def limpiar_estados_evaluacion():
     
     if 'minuto_actual' in st.session_state:
         del st.session_state.minuto_actual
+
+def mostrar_formulario_evaluacion_completo(player, partido):
+    """
+    Muestra el formulario de evaluación completa con análisis de video
+    """
+    
+    # Inicializar estados si no existen
+    if 'eval_completa' not in st.session_state:
+        st.session_state.eval_completa = {
+            'tiempo_analisis': 45,
+            'contexto_partido': '',
+            'datos_tecnicos': {},
+            'datos_tacticos': {},
+            'datos_fisicos': {},
+            'datos_psicologicos': {},
+            'observaciones': {},
+            'posicion_real': player.get('posicion', 'Mediocentro')
+        }
+    
+    st.markdown('<div class="eval-form">', unsafe_allow_html=True)
+    
+    # Header del jugador con selector de posición
+    col_info1, col_info2 = st.columns([2, 1])
+    
+    with col_info1:
+        st.markdown(f"""
+        <div class="jugador-seleccionado">
+            <h3 style="margin: 0;">🎥 Análisis Completo: {player['nombre']} (#{player['numero']})</h3>
+            <p style="margin: 0;">{player['equipo']} {' • 🎯 Objetivo' if player['es_objetivo'] else ''}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col_info2:
+        # Selector de posición REAL en el partido
+        posiciones = [
+            'Portero', 'Central', 'Lateral Derecho', 'Lateral Izquierdo',
+            'Mediocentro Defensivo', 'Mediocentro', 'Media Punta',
+            'Extremo Derecho', 'Extremo Izquierdo', 'Delantero'
+        ]
+        
+        # Intentar preseleccionar basado en posición de BeSoccer
+        posicion_besoccer = player.get('posicion', 'Mediocentro')
+        try:
+            index_default = next(i for i, p in enumerate(posiciones) 
+                               if posicion_besoccer.lower() in p.lower())
+        except:
+            index_default = 5  # Mediocentro por defecto
+        
+        posicion_real = st.selectbox(
+            "📍 Posición real:",
+            posiciones,
+            index=index_default,
+            key=f"posicion_real_completo_{player['nombre']}"
+        )
+        
+        # Guardar la posición seleccionada
+        st.session_state.eval_completa['posicion_real'] = posicion_real
+    
+    st.markdown("---")
+    
+    # Información del contexto
+    col_ctx1, col_ctx2, col_ctx3 = st.columns(3)
+    
+    with col_ctx1:
+        tiempo_analisis = st.number_input(
+            "⏱️ Minutos analizados:",
+            min_value=10,
+            max_value=180,
+            value=st.session_state.eval_completa.get('tiempo_analisis', 45),
+            step=5,
+            help="¿Cuántos minutos de video has visto?"
+        )
+        st.session_state.eval_completa['tiempo_analisis'] = tiempo_analisis
+    
+    with col_ctx2:
+        calidad_video = st.selectbox(
+            "📹 Calidad del análisis:",
+            ["Video completo HD", "Highlights YouTube", "Transmisión TV", "Grabación móvil"],
+            help="Tipo de material usado"
+        )
+        st.session_state.eval_completa['calidad_video'] = calidad_video
+    
+    with col_ctx3:
+        contexto_partido = st.selectbox(
+            "🏆 Contexto del partido:",
+            ["Liga regular", "Copa/Eliminatoria", "Derbi/Clásico", "Partido amistoso", "Final/Semifinal"],
+            help="Importancia del encuentro"
+        )
+        st.session_state.eval_completa['contexto_partido'] = contexto_partido
+    
+    # Nota general y decisión rápida
+    st.markdown("### 📊 Evaluación General")
+    col_gen1, col_gen2, col_gen3 = st.columns(3)
+    
+    with col_gen1:
+        nota_general = st.slider(
+            "🌟 **Nota General**",
+            min_value=1,
+            max_value=10,
+            value=6,
+            help="Valoración global del jugador"
+        )
+        st.session_state.eval_completa['nota_general'] = nota_general
+    
+    with col_gen2:
+        encaja_equipo = st.selectbox(
+            "🤝 **¿Encaja en nuestro equipo?**",
+            ["Sí, perfectamente", "Sí, con ajustes", "Tal vez", "No"],
+            help="¿Se adaptaría a nuestro estilo?"
+        )
+        st.session_state.eval_completa['encaja_equipo'] = encaja_equipo
+    
+    with col_gen3:
+        decision_final = st.selectbox(
+            "✅ **Decisión**",
+            ["📗 Fichar YA", "📘 Seguir observando", "📙 Lista de espera", "📕 Descartar"],
+            help="¿Qué hacemos con este jugador?"
+        )
+        st.session_state.eval_completa['decision_final'] = decision_final
+    
+    st.markdown("---")
+    
+    # EVALUACIÓN POR CATEGORÍAS - ADAPTADA A LA POSICIÓN
+    
+    # Obtener aspectos específicos según la posición seleccionada
+    aspectos = obtener_aspectos_evaluacion_completa(posicion_real)
+    
+    # 1. TÉCNICO
+    with st.expander("🛠️ **Evaluación Técnica**", expanded=True):
+        col_tec1, col_tec2 = st.columns(2)
+        
+        datos_tecnicos = {}
+        aspectos_tecnicos = aspectos['tecnicos']
+        
+        for i, (aspecto, valor_default) in enumerate(aspectos_tecnicos.items()):
+            with col_tec1 if i % 2 == 0 else col_tec2:
+                valor = st.slider(
+                    aspecto,
+                    min_value=1,
+                    max_value=10,
+                    value=st.session_state.eval_completa.get('datos_tecnicos', {}).get(aspecto, valor_default),
+                    key=f"tec_completo_{aspecto.replace(' ', '_').replace('/', '_')}"
+                )
+                datos_tecnicos[aspecto] = valor
+        
+        st.session_state.eval_completa['datos_tecnicos'] = datos_tecnicos
+        
+        # Observaciones técnicas
+        obs_tecnicas = st.text_area(
+            "💭 Observaciones técnicas:",
+            placeholder="Ej: Excelente primer toque, le falta mejorar el perfil débil...",
+            height=80,
+            key="obs_tecnicas_completo"
+        )
+        st.session_state.eval_completa['observaciones']['tecnicas'] = obs_tecnicas
+    
+    # 2. TÁCTICO
+    with st.expander("🧠 **Evaluación Táctica**", expanded=True):
+        col_tac1, col_tac2 = st.columns(2)
+        
+        datos_tacticos = {}
+        aspectos_tacticos = aspectos['tacticos']
+        
+        for i, (aspecto, valor_default) in enumerate(aspectos_tacticos.items()):
+            with col_tac1 if i % 2 == 0 else col_tac2:
+                valor = st.slider(
+                    aspecto,
+                    min_value=1,
+                    max_value=10,
+                    value=st.session_state.eval_completa.get('datos_tacticos', {}).get(aspecto, valor_default),
+                    key=f"tac_completo_{aspecto.replace(' ', '_')}"
+                )
+                datos_tacticos[aspecto] = valor
+        
+        st.session_state.eval_completa['datos_tacticos'] = datos_tacticos
+        
+        # Observaciones tácticas
+        obs_tacticas = st.text_area(
+            "💭 Observaciones tácticas:",
+            placeholder="Ej: Excelente timing en los desmarques, debe mejorar la cobertura defensiva...",
+            height=80,
+            key="obs_tacticas_completo"
+        )
+        st.session_state.eval_completa['observaciones']['tacticas'] = obs_tacticas
+    
+    # 3. FÍSICO
+    with st.expander("💪 **Evaluación Física**", expanded=True):
+        col_fis1, col_fis2 = st.columns(2)
+        
+        datos_fisicos = {}
+        aspectos_fisicos = aspectos['fisicos']
+        
+        # Primero los sliders numéricos
+        aspectos_numericos = {k: v for k, v in aspectos_fisicos.items() if isinstance(v, int)}
+        for i, (aspecto, valor_default) in enumerate(aspectos_numericos.items()):
+            with col_fis1 if i % 2 == 0 else col_fis2:
+                valor = st.slider(
+                    aspecto,
+                    min_value=1,
+                    max_value=10,
+                    value=st.session_state.eval_completa.get('datos_fisicos', {}).get(aspecto, valor_default),
+                    key=f"fis_completo_{aspecto.replace(' ', '_')}"
+                )
+                datos_fisicos[aspecto] = valor
+        
+        # Luego los selectores categóricos
+        st.markdown("**Evaluación cualitativa:**")
+        col_fis_cual1, col_fis_cual2 = st.columns(2)
+        
+        with col_fis_cual1:
+            ritmo_juego = st.select_slider(
+                "⚡ Ritmo de juego",
+                options=["Muy bajo", "Bajo", "Normal", "Alto", "Muy alto"],
+                value="Normal",
+                help="¿A qué ritmo puede jugar?"
+            )
+            datos_fisicos['ritmo_juego'] = ritmo_juego
+        
+        with col_fis_cual2:
+            aguanta_90min = st.select_slider(
+                "⏱️ ¿Aguanta 90 minutos?",
+                options=["No", "Con dificultad", "Sí", "Sí, sobrado"],
+                value="Sí",
+                help="¿Mantiene el nivel todo el partido?"
+            )
+            datos_fisicos['aguanta_90min'] = aguanta_90min
+        
+        st.session_state.eval_completa['datos_fisicos'] = datos_fisicos
+        
+        # Observaciones físicas
+        obs_fisicas = st.text_area(
+            "💭 Observaciones físicas:",
+            placeholder="Ej: Pierde fuelle en el min 70, muy explosivo en carreras cortas...",
+            height=80,
+            key="obs_fisicas_completo"
+        )
+        st.session_state.eval_completa['observaciones']['fisicas'] = obs_fisicas
+    
+    # 4. PSICOLÓGICO/MENTAL
+    with st.expander("🧠 **Evaluación Mental**", expanded=True):
+        st.info("💡 En categorías modestas, el carácter marca la diferencia")
+        
+        col_psi1, col_psi2 = st.columns(2)
+        
+        datos_psicologicos = {}
+        aspectos_mentales = aspectos['mentales']
+        
+        for i, (aspecto, valor_default) in enumerate(aspectos_mentales.items()):
+            with col_psi1 if i % 2 == 0 else col_psi2:
+                valor = st.slider(
+                    aspecto,
+                    min_value=1,
+                    max_value=10,
+                    value=st.session_state.eval_completa.get('datos_psicologicos', {}).get(aspecto, valor_default),
+                    key=f"mental_completo_{aspecto.replace(' ', '_')}"
+                )
+                datos_psicologicos[aspecto] = valor
+        
+        # Añadir evaluaciones cualitativas
+        st.markdown("**Características de personalidad:**")
+        col_psi_cual1, col_psi_cual2 = st.columns(2)
+        
+        with col_psi_cual1:
+            liderazgo = st.select_slider(
+                "👑 Liderazgo",
+                options=["Nulo", "Poco", "Normal", "Líder", "Líder nato"],
+                value="Normal"
+            )
+            datos_psicologicos['liderazgo'] = liderazgo
+        
+        with col_psi_cual2:
+            reaccion_adversidad = st.select_slider(
+                "💪 Ante la adversidad",
+                options=["Se hunde", "Le afecta", "Normal", "Se crece", "Bestia competitiva"],
+                value="Normal"
+            )
+            datos_psicologicos['reaccion_adversidad'] = reaccion_adversidad
+        
+        st.session_state.eval_completa['datos_psicologicos'] = datos_psicologicos
+        
+        # Observaciones psicológicas
+        obs_psicologicas = st.text_area(
+            "💭 Observaciones mentales:",
+            placeholder="Ej: Líder nato, organiza la defensa, mantiene la calma en momentos de presión...",
+            height=80,
+            key="obs_psicologicas_completo"
+        )
+        st.session_state.eval_completa['observaciones']['psicologicas'] = obs_psicologicas
+    
+    # MOMENTOS CLAVE
+    with st.expander("📹 **Momentos Destacados del Video**", expanded=False):
+        st.info("💡 Anota los minutos clave para crear un video resumen")
+        
+        momentos_clave = st.text_area(
+            "Momentos importantes (minuto: acción):",
+            placeholder="""Min 12: Gran pase entre líneas que genera ocasión
+Min 34: Error en salida que casi cuesta gol
+Min 67: Golazo desde fuera del área
+Min 89: Carrera de 60m para evitar un gol""",
+            height=120,
+            key="momentos_clave_completo"
+        )
+        st.session_state.eval_completa['momentos_clave'] = momentos_clave
+    
+    # RESUMEN FINAL
+    st.markdown("---")
+    st.markdown("### 📋 Resumen y Recomendación Final")
+    
+    col_res1, col_res2 = st.columns([2, 1])
+    
+    with col_res1:
+        resumen_scout = st.text_area(
+            "✍️ **Resumen ejecutivo** (lo que le dirías al director deportivo):",
+            placeholder="""Jugador técnico con buena visión de juego. Destaca en espacios reducidos.
+Le falta intensidad defensiva pero tiene carácter ganador.
+Encajaría bien en nuestro 4-3-3 como interior.
+Por 50.000€ sería una gran incorporación.""",
+            height=120,
+            key="resumen_scout_completo"
+        )
+        st.session_state.eval_completa['resumen_scout'] = resumen_scout
+    
+    with col_res2:
+        precio_maximo = st.selectbox(
+            "💰 **Precio máximo a pagar**",
+            ["Gratis/Libre", "< 10.000€", "10-25.000€", "25-50.000€", 
+             "50-100.000€", "100-250.000€", "> 250.000€"],
+            help="¿Cuánto pagarías como máximo?"
+        )
+        st.session_state.eval_completa['precio_maximo'] = precio_maximo
+        
+        prioridad_fichaje = st.select_slider(
+            "🎯 **Prioridad**",
+            options=["Baja", "Media", "Alta", "Urgente"],
+            value="Media",
+            help="¿Cuán urgente es ficharlo?"
+        )
+        st.session_state.eval_completa['prioridad_fichaje'] = prioridad_fichaje
+    
+    # VALIDACIÓN Y GUARDADO
+    st.markdown("---")
+    
+    # Mostrar completitud
+    col_val1, col_val2, col_val3 = st.columns(3)
+    
+    with col_val1:
+        completitud = min(100, int((tiempo_analisis / 30) * 100))
+        st.metric("📊 Análisis completado", f"{completitud}%")
+    
+    with col_val2:
+        total_aspectos = (len(datos_tecnicos) + len(datos_tacticos) + 
+                         len(datos_fisicos) + len(datos_psicologicos))
+        st.metric("✅ Aspectos evaluados", total_aspectos)
+    
+    with col_val3:
+        tiene_resumen = len(resumen_scout) > 50
+        st.metric("📝 Resumen", "✅ Sí" if tiene_resumen else "❌ No")
+    
+    # Botones de acción
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+    
+    with col_btn1:
+        if st.button("💾 Guardar Borrador", key="save_draft_completo_v2", use_container_width=True):
+            st.info("💾 Guardando borrador...")
+            # Aquí se podría implementar guardado temporal
+            st.success("✅ Borrador guardado")
+    
+    with col_btn2:
+        if st.button("📄 Vista Previa", key="preview_completo_v2", use_container_width=True):
+            with st.expander("Vista previa del informe", expanded=True):
+                st.write(f"**Jugador:** {player['nombre']} ({player['equipo']})")
+                st.write(f"**Posición evaluada:** {posicion_real}")
+                st.write(f"**Nota:** {nota_general}/10")
+                st.write(f"**Decisión:** {decision_final}")
+                st.write(f"**Resumen:** {resumen_scout}")
+    
+    with col_btn3:
+        puede_guardar = (tiempo_analisis >= 15 and len(resumen_scout) > 50)
+        
+        if st.button(
+            "✅ GUARDAR INFORME", 
+            key="save_final_completo_v2", 
+            use_container_width=True, 
+            type="primary",
+            disabled=not puede_guardar
+        ):
+            if guardar_informe_final_completo(player, partido, posicion_real):
+                st.success("✅ Informe guardado exitosamente")
+                time.sleep(1)
+                limpiar_estados_evaluacion_completo()
+                st.session_state.jugador_evaluando = None
+                st.rerun()
+            else:
+                st.error("❌ Error al guardar el informe")
+    
+    if not puede_guardar:
+        if tiempo_analisis < 15:
+            st.warning("⚠️ Necesitas al menos 15 minutos de análisis")
+        if len(resumen_scout) <= 50:
+            st.warning("⚠️ El resumen debe tener al menos 50 caracteres")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def obtener_aspectos_evaluacion_completa(posicion):
+    """
+    Devuelve los aspectos de evaluación específicos para cada posición
+    en el modo de evaluación completa (más detallado que el modo campo)
+    """
+    
+    aspectos_por_posicion = {
+        'Portero': {
+            'tecnicos': {
+                'Paradas reflejos': 5,
+                'Blocaje seguro': 5,
+                'Juego con pies': 5,
+                'Saques precisión': 5,
+                'Salidas aéreas': 5,
+                'Mano a mano': 5
+            },
+            'tacticos': {
+                'Posicionamiento': 5,
+                'Lectura del juego': 5,
+                'Comunicación defensa': 5,
+                'Dominio del área': 5,
+                'Anticipación': 5,
+                'Organización defensiva': 5
+            },
+            'fisicos': {
+                'Agilidad': 5,
+                'Explosividad': 5,
+                'Flexibilidad': 5,
+                'Alcance': 5
+            },
+            'mentales': {
+                'Concentración': 5,
+                'Confianza': 5,
+                'Presión': 5,
+                'Recuperación errores': 5,
+                'Liderazgo': 5,
+                'Personalidad': 5
+            }
+        },
+        
+        'Central': {
+            'tecnicos': {
+                'Juego aéreo': 5,
+                'Pase largo': 5,
+                'Control orientado': 5,
+                'Salida balón': 5,
+                'Entrada limpia': 5,
+                'Despeje orientado': 5
+            },
+            'tacticos': {
+                'Marcaje hombre': 5,
+                'Marcaje zonal': 5,
+                'Cobertura': 5,
+                'Línea de pase': 5,
+                'Anticipación': 5,
+                'Timing subida': 5
+            },
+            'fisicos': {
+                'Fuerza': 5,
+                'Salto': 5,
+                'Velocidad': 5,
+                'Resistencia': 5
+            },
+            'mentales': {
+                'Concentración': 5,
+                'Agresividad': 5,
+                'Liderazgo': 5,
+                'Comunicación': 5,
+                'Temple': 5,
+                'Inteligencia': 5
+            }
+        },
+        
+        'Lateral Derecho': {
+            'tecnicos': {
+                'Centro precisión': 5,
+                'Control velocidad': 5,
+                'Pase interior': 5,
+                'Conducción': 5,
+                'Tackle': 5,
+                'Técnica defensiva': 5
+            },
+            'tacticos': {
+                'Subida ataque': 5,
+                'Repliegue': 5,
+                'Apoyo interior': 5,
+                'Vigilancia extremo': 5,
+                'Basculación': 5,
+                'Profundidad': 5
+            },
+            'fisicos': {
+                'Velocidad': 5,
+                'Resistencia': 5,
+                'Agilidad': 5,
+                'Potencia': 5
+            },
+            'mentales': {
+                'Disciplina táctica': 5,
+                'Concentración': 5,
+                'Valentía': 5,
+                'Inteligencia': 5,
+                'Sacrificio': 5,
+                'Ambición': 5
+            }
+        },
+        
+        'Lateral Izquierdo': {
+            'tecnicos': {
+                'Centro precisión': 5,
+                'Control velocidad': 5,
+                'Pase interior': 5,
+                'Conducción': 5,
+                'Tackle': 5,
+                'Técnica defensiva': 5
+            },
+            'tacticos': {
+                'Subida ataque': 5,
+                'Repliegue': 5,
+                'Apoyo interior': 5,
+                'Vigilancia extremo': 5,
+                'Basculación': 5,
+                'Profundidad': 5
+            },
+            'fisicos': {
+                'Velocidad': 5,
+                'Resistencia': 5,
+                'Agilidad': 5,
+                'Potencia': 5
+            },
+            'mentales': {
+                'Disciplina táctica': 5,
+                'Concentración': 5,
+                'Valentía': 5,
+                'Inteligencia': 5,
+                'Sacrificio': 5,
+                'Ambición': 5
+            }
+        },
+        
+        'Mediocentro Defensivo': {
+            'tecnicos': {
+                'Interceptación': 5,
+                'Pase corto seguro': 5,
+                'Pase largo': 5,
+                'Control presión': 5,
+                'Barrido': 5,
+                'Juego aéreo': 5
+            },
+            'tacticos': {
+                'Cobertura defensiva': 5,
+                'Distribución': 5,
+                'Posicionamiento': 5,
+                'Pressing': 5,
+                'Transición def-atq': 5,
+                'Lectura juego': 5
+            },
+            'fisicos': {
+                'Resistencia': 5,
+                'Fuerza': 5,
+                'Agilidad': 5,
+                'Potencia': 5
+            },
+            'mentales': {
+                'Concentración': 5,
+                'Disciplina': 5,
+                'Liderazgo': 5,
+                'Sacrificio': 5,
+                'Inteligencia táctica': 5,
+                'Madurez': 5
+            }
+        },
+        
+        'Mediocentro': {
+            'tecnicos': {
+                'Pase corto': 5,
+                'Pase medio': 5,
+                'Control orientado': 5,
+                'Conducción': 5,
+                'Tiro medio': 5,
+                'Presión': 5
+            },
+            'tacticos': {
+                'Visión juego': 5,
+                'Movilidad': 5,
+                'Creación espacios': 5,
+                'Pressing inteligente': 5,
+                'Llegada área': 5,
+                'Equilibrio': 5
+            },
+            'fisicos': {
+                'Resistencia': 5,
+                'Velocidad': 5,
+                'Agilidad': 5,
+                'Cambio ritmo': 5
+            },
+            'mentales': {
+                'Creatividad': 5,
+                'Personalidad': 5,
+                'Presión': 5,
+                'Inteligencia': 5,
+                'Ambición': 5,
+                'Trabajo equipo': 5
+            }
+        },
+        
+        'Media Punta': {
+            'tecnicos': {
+                'Último pase': 5,
+                'Control espacios reducidos': 5,
+                'Regate corto': 5,
+                'Tiro': 5,
+                'Pase entre líneas': 5,
+                'Técnica depurada': 5
+            },
+            'tacticos': {
+                'Encontrar espacios': 5,
+                'Asociación': 5,
+                'Desmarque apoyo': 5,
+                'Lectura defensiva rival': 5,
+                'Timing pase': 5,
+                'Cambio orientación': 5
+            },
+            'fisicos': {
+                'Agilidad': 5,
+                'Cambio ritmo': 5,
+                'Equilibrio': 5,
+                'Coordinación': 5
+            },
+            'mentales': {
+                'Creatividad': 5,
+                'Visión': 5,
+                'Confianza': 5,
+                'Personalidad': 5,
+                'Presión': 5,
+                'Liderazgo técnico': 5
+            }
+        },
+        
+        'Extremo Derecho': {
+            'tecnicos': {
+                'Regate': 5,
+                'Centro': 5,
+                'Finalización': 5,
+                'Control velocidad': 5,
+                'Cambio ritmo': 5,
+                'Recorte interior': 5
+            },
+            'tacticos': {
+                'Desmarque': 5,
+                'Profundidad': 5,
+                'Ayuda defensiva': 5,
+                'Movimientos sin balón': 5,
+                'Asociación': 5,
+                'Amplitud': 5
+            },
+            'fisicos': {
+                'Velocidad punta': 5,
+                'Explosividad': 5,
+                'Agilidad': 5,
+                'Resistencia': 5
+            },
+            'mentales': {
+                'Valentía 1v1': 5,
+                'Confianza': 5,
+                'Sacrificio': 5,
+                'Perseverancia': 5,
+                'Decisión': 5,
+                'Ambición': 5
+            }
+        },
+        
+        'Extremo Izquierdo': {
+            'tecnicos': {
+                'Regate': 5,
+                'Centro': 5,
+                'Finalización': 5,
+                'Control velocidad': 5,
+                'Cambio ritmo': 5,
+                'Recorte interior': 5
+            },
+            'tacticos': {
+                'Desmarque': 5,
+                'Profundidad': 5,
+                'Ayuda defensiva': 5,
+                'Movimientos sin balón': 5,
+                'Asociación': 5,
+                'Amplitud': 5
+            },
+            'fisicos': {
+                'Velocidad punta': 5,
+                'Explosividad': 5,
+                'Agilidad': 5,
+                'Resistencia': 5
+            },
+            'mentales': {
+                'Valentía 1v1': 5,
+                'Confianza': 5,
+                'Sacrificio': 5,
+                'Perseverancia': 5,
+                'Decisión': 5,
+                'Ambición': 5
+            }
+        },
+        
+        'Delantero': {
+            'tecnicos': {
+                'Finalización pie derecho': 5,
+                'Finalización pie izquierdo': 5,
+                'Finalización cabeza': 5,
+                'Control área': 5,
+                'Juego espaldas': 5,
+                'Primer toque': 5
+            },
+            'tacticos': {
+                'Desmarque ruptura': 5,
+                'Timing llegada': 5,
+                'Arrastre marcas': 5,
+                'Pressing': 5,
+                'Asociación': 5,
+                'Lectura juego': 5
+            },
+            'fisicos': {
+                'Potencia': 5,
+                'Velocidad': 5,
+                'Salto': 5,
+                'Fuerza': 5
+            },
+            'mentales': {
+                'Sangre fría': 5,
+                'Confianza': 5,
+                'Ambición': 5,
+                'Persistencia': 5,
+                'Competitividad': 5,
+                'Presión gol': 5
+            }
+        }
+    }
+    
+    # Si la posición no está definida, usar aspectos genéricos de Mediocentro
+    return aspectos_por_posicion.get(posicion, aspectos_por_posicion['Mediocentro'])
+
+
+def guardar_informe_final_completo(player, partido, posicion_real):
+    """Prepara y guarda el informe final de evaluación completa en la base de datos"""
+    try:
+        # Obtener todos los datos de la evaluación
+        eval_data = st.session_state.eval_completa
+        
+        # Calcular promedios por categoría
+        datos_tecnicos = eval_data.get('datos_tecnicos', {})
+        datos_tacticos = eval_data.get('datos_tacticos', {})
+        datos_fisicos = eval_data.get('datos_fisicos', {})
+        datos_psicologicos = eval_data.get('datos_psicologicos', {})
+        
+        promedio_tecnico = sum(datos_tecnicos.values()) / len(datos_tecnicos) if datos_tecnicos else 5
+        promedio_tactico = sum(datos_tacticos.values()) / len(datos_tacticos) if datos_tacticos else 5
+        
+        # Para físicos y psicológicos, filtrar solo valores numéricos
+        valores_fisicos_num = [v for v in datos_fisicos.values() if isinstance(v, int)]
+        valores_psico_num = [v for v in datos_psicologicos.values() if isinstance(v, int)]
+        
+        promedio_fisico = sum(valores_fisicos_num) / len(valores_fisicos_num) if valores_fisicos_num else 5
+        promedio_psicologico = sum(valores_psico_num) / len(valores_psico_num) if valores_psico_num else 5
+        
+        # Obtener datos generales
+        nota_general = eval_data.get('nota_general', 5)
+        decision_final = eval_data.get('decision_final', '📘 Seguir observando')
+        resumen_scout = eval_data.get('resumen_scout', '')
+        
+        # Mapear decisión a recomendación
+        mapeo_decision = {
+            "📗 Fichar YA": "fichar",
+            "📘 Seguir observando": "seguir_observando",
+            "📙 Lista de espera": "seguir_observando",
+            "📕 Descartar": "descartar"
+        }
+        
+        # Determinar potencial basado en edad y nota
+        if nota_general >= 8:
+            potencial = "alto"
+        elif nota_general >= 6:
+            potencial = "medio"
+        else:
+            potencial = "bajo"
+        
+        # Preparar observaciones completas
+        observaciones_completas = f"""
+ANÁLISIS COMPLETO CON VIDEO
+Posición evaluada: {posicion_real}
+Tiempo de análisis: {eval_data.get('tiempo_analisis', 0)} minutos
+Calidad: {eval_data.get('calidad_video', 'N/A')}
+Contexto: {eval_data.get('contexto_partido', 'N/A')}
+
+RESUMEN EJECUTIVO:
+{resumen_scout}
+
+EVALUACIÓN POR ÁREAS:
+- Técnica: {promedio_tecnico:.1f}/10
+- Táctica: {promedio_tactico:.1f}/10
+- Física: {promedio_fisico:.1f}/10 ({datos_fisicos.get('ritmo_juego', 'N/A')} / {datos_fisicos.get('aguanta_90min', 'N/A')})
+- Mental: {promedio_psicologico:.1f}/10
+
+OBSERVACIONES TÉCNICAS:
+{eval_data.get('observaciones', {}).get('tecnicas', 'Sin observaciones')}
+
+OBSERVACIONES TÁCTICAS:
+{eval_data.get('observaciones', {}).get('tacticas', 'Sin observaciones')}
+
+OBSERVACIONES FÍSICAS:
+{eval_data.get('observaciones', {}).get('fisicas', 'Sin observaciones')}
+
+OBSERVACIONES MENTALES:
+{eval_data.get('observaciones', {}).get('psicologicas', 'Sin observaciones')}
+
+MOMENTOS CLAVE:
+{eval_data.get('momentos_clave', 'Sin momentos destacados')}
+
+DECISIÓN: {decision_final}
+PRECIO MÁXIMO: {eval_data.get('precio_maximo', 'No especificado')}
+PRIORIDAD: {eval_data.get('prioridad_fichaje', 'Media')}
+"""
+        
+        # Identificar fortalezas y debilidades
+        fortalezas = []
+        debilidades = []
+        
+        # Analizar todos los aspectos evaluados
+        todos_aspectos = {
+            **datos_tecnicos,
+            **datos_tacticos,
+            **{k: v for k, v in datos_fisicos.items() if isinstance(v, int)},
+            **{k: v for k, v in datos_psicologicos.items() if isinstance(v, int)}
+        }
+        
+        for aspecto, valor in todos_aspectos.items():
+            if valor >= 7:
+                fortalezas.append(f"{aspecto} ({valor}/10)")
+            elif valor <= 4:
+                debilidades.append(f"{aspecto} ({valor}/10)")
+        
+        # Preparar datos para guardar - mapear a campos de BD existentes
+        informe_data = {
+            'partido_id': partido['id'],
+            'jugador_nombre': player['nombre'],
+            'equipo': player['equipo'],
+            'posicion': posicion_real,  # Usar la posición real evaluada
+            'scout_usuario': current_user['usuario'],
+            'nota_general': nota_general,
+            'potencial': potencial,
+            'recomendacion': mapeo_decision.get(decision_final, 'seguir_observando'),
+            'observaciones': observaciones_completas,
+            'minutos_observados': eval_data.get('tiempo_analisis', 45),
+            'fortalezas': ', '.join(fortalezas[:5]) if fortalezas else 'Ver evaluación detallada',
+            'debilidades': ', '.join(debilidades[:5]) if debilidades else 'Ver evaluación detallada',
+            'tipo_evaluacion': 'video_completo',
+            'imagen_url': player.get('imagen_url', ''),
+            
+            # Mapear evaluaciones a campos existentes de BD
+            'control_balon': datos_tecnicos.get('Control orientado', datos_tecnicos.get('Control y primer toque', 5)),
+            'primer_toque': datos_tecnicos.get('Primer toque', datos_tecnicos.get('Control y primer toque', 5)),
+            'pase_corto': datos_tecnicos.get('Pase corto', datos_tecnicos.get('Pase corto/medio', 5)),
+            'pase_largo': datos_tecnicos.get('Pase largo', 5),
+            'regate': datos_tecnicos.get('Regate', datos_tecnicos.get('Regate/Conducción', 5)),
+            'finalizacion': datos_tecnicos.get('Finalización', datos_tecnicos.get('Finalización pie derecho', 5)),
+            
+            'vision_juego': datos_tacticos.get('Visión juego', datos_tacticos.get('Lectura del juego', 5)),
+            'posicionamiento': datos_tacticos.get('Posicionamiento', 5),
+            'marcaje': datos_tacticos.get('Marcaje hombre', datos_tacticos.get('Marcaje', 5)),
+            'pressing': datos_tacticos.get('Pressing', datos_tacticos.get('Pressing inteligente', 5)),
+            'transiciones': datos_tacticos.get('Transición def-atq', datos_tacticos.get('Movimientos sin balón', 5)),
+            
+            'velocidad': datos_fisicos.get('Velocidad', datos_fisicos.get('Velocidad punta', 5)),
+            'resistencia': datos_fisicos.get('Resistencia', 5),
+            'fuerza': datos_fisicos.get('Fuerza', 5),
+            'salto': datos_fisicos.get('Salto', 5),
+            'agilidad': datos_fisicos.get('Agilidad', 5),
+            
+            'concentracion': datos_psicologicos.get('Concentración', 5),
+            'liderazgo': datos_psicologicos.get('Liderazgo', 5),
+            'comunicacion': datos_psicologicos.get('Comunicación', 5),
+            'presion': datos_psicologicos.get('Presión', 5),
+            'decision': datos_tacticos.get('Toma de decisiones', datos_psicologicos.get('Decisión', 5))
+        }
+        
+        # Guardar el partido si no existe
+        partido_model.guardar_partido_si_no_existe(partido)
+        
+        # Guardar el informe
+        informe_id = partido_model.crear_informe_scouting(informe_data)
+        
+        if informe_id:
+            # Actualizar base personal si está disponible
+            if DB_HELPERS_DISPONIBLE:
+                try:
+                    jugador_data = {
+                        'nombre': player['nombre'],
+                        'numero': player.get('numero', '?'),
+                        'posicion': posicion_real,
+                        'imagen_url': player.get('imagen_url', ''),
+                        'es_titular': True
+                    }
+                    
+                    partido_data = {
+                        **partido,
+                        'equipo': player['equipo'],
+                        'nota_evaluacion': nota_general,
+                        'recomendacion': mapeo_decision.get(decision_final, 'seguir_observando')
+                    }
+                    
+                    from utils.db_helpers import actualizar_jugador_desde_informe
+                    actualizar_jugador_desde_informe(jugador_data, partido_data, current_user['usuario'], informe_id)
+                    
+                except Exception as e:
+                    print(f"⚠️ Error actualizando Base Personal: {e}")
+            
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error al guardar informe completo: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def limpiar_estados_evaluacion_completo():
+    """Limpia los estados temporales de la evaluación completa"""
+    if 'eval_completa' in st.session_state:
+        del st.session_state.eval_completa
 
 # ================================
 # ESTADO DE LA APLICACIÓN
@@ -1435,77 +2370,8 @@ elif st.session_state.modo_vista == 'observacion':
         # LLAMAR A LA FUNCIÓN CORRESPONDIENTE SEGÚN EL MODO
         if st.session_state.modo_evaluacion == 'campo':
             mostrar_formulario_evaluacion_campo(player, st.session_state.partido_activo)
-        else:
-            # MODO COMPLETO - Mantener el formulario actual por ahora
-            st.markdown('<div class="eval-form">', unsafe_allow_html=True)
-            
-            # Header del jugador seleccionado
-            st.markdown(f"""
-            <div class="jugador-seleccionado">
-                <h3>📝 Evaluando: {player['nombre']}</h3>
-                <p>{player['equipo']} • {player['posicion']} • #{player['numero']}</p>
-                {f"<p>🎯 Jugador Objetivo</p>" if player['es_objetivo'] else ""}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown("#### 🎥 Evaluación Completa")
-            st.info("💡 Para análisis posterior detallado")
-            
-            with st.form("evaluacion_jugador_completo", clear_on_submit=False):
-                nota_general = st.slider("🌟 Nota General", 1, 10, 5)
-                potencial = st.selectbox("📈 Potencial", ["Bajo", "Medio", "Alto", "Muy Alto"], index=1)
-                recomendacion = st.selectbox("💼 Recomendación", 
-                                           ["Descartar", "Seguir observando", "Interés moderado", "Contratar"], 
-                                           index=1)
-                minutos_jugados = st.number_input("⚽ Minutos jugados", min_value=1, max_value=120, value=45)
-                observaciones = st.text_area("💭 Observaciones detalladas", 
-                                           placeholder="Análisis completo del rendimiento...",
-                                           height=100)
-                
-                # Botones de envío
-                col_submit1, col_submit2 = st.columns(2)
-                
-                with col_submit1:
-                    submitted = st.form_submit_button("💾 Guardar Informe", use_container_width=True, type="primary")
-                
-                with col_submit2:
-                    continuar = st.form_submit_button("➡️ Guardar y Continuar", use_container_width=True)
-            
-            # Procesar envío del formulario
-            if submitted or continuar:
-                print(f"DEBUG Formulario completo - submitted: {submitted}, continuar: {continuar}")
-                print(f"DEBUG - current_user: {current_user}")
-                print(f"DEBUG - partido_activo: {st.session_state.partido_activo}")
-                try:
-                    informe_data = {
-                        'partido_id': st.session_state.partido_activo['id'],
-                        'jugador_nombre': player['nombre'],
-                        'equipo': player['equipo'],
-                        'posicion': player['posicion'],
-                        'scout_usuario': current_user['usuario'],
-                        'nota_general': nota_general,
-                        'potencial': potencial.lower(),
-                        'recomendacion': recomendacion.lower().replace(' ', '_'),
-                        'observaciones': observaciones,
-                        'minutos_observados': minutos_jugados,
-                        'fortalezas': f"Evaluación completa. Nota: {nota_general}/10",
-                        'debilidades': f"Por determinar en análisis detallado"
-                    }
-                    print(f"DEBUG - informe_data completo: {informe_data}")
-                    informe_id = partido_model.crear_informe_scouting(informe_data)
-                    print(f"DEBUG - Informe guardado con ID: {informe_id}")
-                    
-                    st.success(f"✅ **Informe guardado exitosamente!** (ID: {informe_id})")
-                    st.success(f"🎯 **Jugador:** {player['nombre']} | **Nota:** {nota_general}/10 | **Recomendación:** {recomendacion}")
-                    
-                    if continuar:
-                        st.session_state.jugador_evaluando = None
-                        st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error al guardar el informe: {str(e)}")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        else:  # 'completo'
+            mostrar_formulario_evaluacion_completo(player, st.session_state.partido_activo)
 
 # ================================
 # SIDEBAR (simplificado)
