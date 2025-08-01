@@ -4,6 +4,19 @@ import numpy as np
 import sys
 import os
 
+try:
+    st.set_page_config(page_title="Web Scouting", layout="wide")
+
+    st.write("✅ Arranque de Streamlit exitoso")
+
+    if "usuario" not in st.session_state:
+        st.warning("Esperando autenticación")
+        st.stop()
+
+except Exception as e:
+    st.error(f"❌ Error crítico al arrancar la app: {e}")
+    st.stop()
+
 # Configuración de la página
 st.set_page_config(
     page_title="WebScouting - Dashboard",
