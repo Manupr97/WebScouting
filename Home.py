@@ -11,15 +11,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-try:
-    st.write("✅ App arrancando correctamente...")
-    # Si no hay usuario, mostrar mensaje sin abortar
-    if "usuario" not in st.session_state:
-        st.warning("Autenticación pendiente...")
-        st.stop()
-except Exception as e:
-    st.error(f"❌ Error crítico en arranque: {e}")
-    st.stop()
+
 # Agregar path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
