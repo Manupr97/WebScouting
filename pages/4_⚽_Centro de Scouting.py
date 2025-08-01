@@ -237,7 +237,6 @@ if not login_manager.is_authenticated():
     st.stop()
 
 current_user = login_manager.get_current_user()
-print(f"DEBUG Centro Scouting - current_user: {current_user}")
 
 # Header principal
 st.markdown(f"""
@@ -253,6 +252,254 @@ st.markdown(f"""
 # ================================
 # FUNCIONES AUXILIARES CORREGIDAS
 # ================================
+def calcular_metricas_estructuradas(metricas, posicion_real, tipo_evaluacion='campo'):
+    """
+    Convierte las métricas planas en una estructura completa con promedios por categorías.
+    
+    Args:
+        metricas: dict con las evaluaciones individuales
+        posicion_real: str con la posición del jugador
+        tipo_evaluacion: 'campo' o 'video_completo'
+    
+    Returns:
+        dict con la estructura completa esperada por el sistema de visualización
+    """
+    
+    # Definir mapeo de métricas a categorías por posición
+    MAPEO_CATEGORIAS = {
+        'Portero': {
+            'tecnicos': ['paradas_y_reflejos', 'paradas_reflejos', 'blocaje_seguro', 'juego_con_pies', 
+                        'saques_precision', 'salidas_aereas', 'mano_a_mano', 'juego_pies'],
+            'tacticos': ['posicionamiento', 'lectura_del_juego', 'comunicacion_defensa', 'comunicacion',
+                        'dominio_del_area', 'anticipacion', 'organizacion_defensiva'],
+            'fisicos': ['agilidad', 'explosividad', 'flexibilidad', 'alcance', 'salto', 'velocidad'],
+            'mentales': ['concentracion', 'confianza', 'presion', 'recuperacion_errores', 
+                        'liderazgo', 'personalidad', 'temple']
+        },
+        'Central': {
+            'tecnicos': ['juego_aereo', 'marcaje', 'pase_largo', 'control_orientado', 
+                        'salida_balon', 'salida_de_balon', 'entrada_limpia', 'despeje_orientado', 'tackle'],
+            'tacticos': ['marcaje_hombre', 'marcaje_zonal', 'cobertura', 'linea_de_pase', 
+                        'anticipacion', 'timing_subida', 'posicionamiento', 'basculacion'],
+            'fisicos': ['fuerza', 'salto', 'velocidad', 'resistencia', 'potencia', 'agilidad'],
+            'mentales': ['concentracion', 'agresividad', 'liderazgo', 'comunicacion', 
+                        'temple', 'inteligencia', 'personalidad']
+        },
+        'Lateral Derecho': {
+            'tecnicos': ['centro_precision', 'centros', 'control_velocidad', 'pase_interior', 
+                        'conduccion', 'tackle', 'tecnica_defensiva', 'pase'],
+            'tacticos': ['subida_ataque', 'repliegue', 'apoyo_interior', 'apoyo_ofensivo',
+                        'vigilancia_extremo', 'basculacion', 'profundidad', 'defensa_1v1'],
+            'fisicos': ['velocidad', 'resistencia', 'agilidad', 'potencia', 'fisico', 'explosividad'],
+            'mentales': ['disciplina_tactica', 'concentracion', 'valentia', 'inteligencia', 
+                        'sacrificio', 'ambicion', 'trabajo_equipo']
+        },
+        'Lateral Izquierdo': {
+            'tecnicos': ['centro_precision', 'centros', 'control_velocidad', 'pase_interior', 
+                        'conduccion', 'tackle', 'tecnica_defensiva', 'pase'],
+            'tacticos': ['subida_ataque', 'repliegue', 'apoyo_interior', 'apoyo_ofensivo',
+                        'vigilancia_extremo', 'basculacion', 'profundidad', 'defensa_1v1'],
+            'fisicos': ['velocidad', 'resistencia', 'agilidad', 'potencia', 'fisico', 'explosividad'],
+            'mentales': ['disciplina_tactica', 'concentracion', 'valentia', 'inteligencia', 
+                        'sacrificio', 'ambicion', 'trabajo_equipo']
+        },
+        'Mediocentro Defensivo': {
+            'tecnicos': ['interceptacion', 'pase_corto_seguro', 'pase_largo', 'control_presion',
+                        'barrido', 'juego_aereo', 'recuperacion', 'distribucion', 'pase_corto'],
+            'tacticos': ['cobertura_defensiva', 'distribucion', 'posicionamiento', 'pressing',
+                        'transicion_def-atq', 'lectura_juego', 'duelos', 'corte'],
+            'fisicos': ['resistencia', 'fuerza', 'agilidad', 'potencia', 'velocidad'],
+            'mentales': ['concentracion', 'disciplina', 'liderazgo', 'sacrificio', 
+                        'inteligencia_tactica', 'madurez', 'personalidad']
+        },
+        'Mediocentro': {
+            'tecnicos': ['pase_corto', 'pase_medio', 'pase', 'control_orientado', 'conduccion',
+                        'tiro_medio', 'presion', 'primer_toque', 'tecnica'],
+            'tacticos': ['vision_juego', 'vision_de_juego', 'movilidad', 'creacion_espacios', 
+                        'pressing_inteligente', 'llegada_area', 'llegada', 'equilibrio', 'posicionamiento'],
+            'fisicos': ['resistencia', 'velocidad', 'agilidad', 'cambio_ritmo', 'fisico'],
+            'mentales': ['creatividad', 'personalidad', 'presion', 'inteligencia', 
+                        'ambicion', 'trabajo_equipo', 'concentracion']
+        },
+        'Media Punta': {
+            'tecnicos': ['ultimo_pase', 'control_espacios_reducidos', 'regate_corto', 'tiro',
+                        'pase_entre_lineas', 'tecnica_depurada', 'creatividad', 'finalizacion'],
+            'tacticos': ['encontrar_espacios', 'asociacion', 'desmarque_apoyo', 'lectura_defensiva_rival',
+                        'timing_pase', 'cambio_orientacion', 'movilidad', 'vision_juego'],
+            'fisicos': ['agilidad', 'cambio_ritmo', 'equilibrio', 'coordinacion', 'velocidad'],
+            'mentales': ['creatividad', 'vision', 'confianza', 'personalidad', 
+                        'presion', 'liderazgo_tecnico', 'inteligencia']
+        },
+        'Extremo Derecho': {
+            'tecnicos': ['regate', 'centro', 'centros', 'finalizacion', 'control_velocidad',
+                        'cambio_ritmo', 'recorte_interior', 'velocidad', 'tecnica'],
+            'tacticos': ['desmarque', 'profundidad', 'ayuda_defensiva', 'movimientos_sin_balon',
+                        'asociacion', 'amplitud', 'desmarques', 'uno_contra_uno'],
+            'fisicos': ['velocidad_punta', 'velocidad', 'explosividad', 'agilidad', 'resistencia', 'cambio_ritmo'],
+            'mentales': ['valentia_1v1', 'confianza', 'sacrificio', 'perseverancia', 
+                        'decision', 'ambicion', 'atrevimiento']
+        },
+        'Extremo Izquierdo': {
+            'tecnicos': ['regate', 'centro', 'centros', 'finalizacion', 'control_velocidad',
+                        'cambio_ritmo', 'recorte_interior', 'velocidad', 'tecnica'],
+            'tacticos': ['desmarque', 'profundidad', 'ayuda_defensiva', 'movimientos_sin_balon',
+                        'asociacion', 'amplitud', 'desmarques', 'uno_contra_uno'],
+            'fisicos': ['velocidad_punta', 'velocidad', 'explosividad', 'agilidad', 'resistencia', 'cambio_ritmo'],
+            'mentales': ['valentia_1v1', 'confianza', 'sacrificio', 'perseverancia', 
+                        'decision', 'ambicion', 'atrevimiento']
+        },
+        'Delantero': {
+            'tecnicos': ['finalizacion_pie_derecho', 'finalizacion_pie_izquierdo', 'finalizacion_cabeza',
+                        'finalizacion', 'control_area', 'juego_espaldas', 'primer_toque', 'remate'],
+            'tacticos': ['desmarque_ruptura', 'desmarques', 'timing_llegada', 'arrastre_marcas',
+                        'pressing', 'asociacion', 'lectura_juego', 'juego_aereo', 'posicionamiento'],
+            'fisicos': ['potencia', 'velocidad', 'salto', 'fuerza', 'explosividad', 'resistencia'],
+            'mentales': ['sangre_fria', 'confianza', 'ambicion', 'persistencia', 
+                        'competitividad', 'presion_gol', 'personalidad', 'concentracion']
+        }
+    }
+    
+    # Obtener el mapeo de la posición o usar uno genérico
+    mapeo_posicion = MAPEO_CATEGORIAS.get(posicion_real, MAPEO_CATEGORIAS['Mediocentro'])
+    
+    # Inicializar estructura de resultado
+    resultado = {
+        'tipo': tipo_evaluacion,
+        'posicion_evaluada': posicion_real,
+        'evaluaciones': {},
+        'categorias': {
+            'tecnicos': {},
+            'tacticos': {},
+            'fisicos': {},
+            'mentales': {}
+        },
+        'promedios': {
+            'tecnicos': 0,
+            'tacticos': 0,
+            'fisicos': 0,
+            'mentales': 0
+        }
+    }
+    
+    # Clasificar las métricas recibidas
+    metricas_clasificadas = {
+        'tecnicos': [],
+        'tacticos': [],
+        'fisicos': [],
+        'mentales': []
+    }
+    
+    # Para cada métrica evaluada
+    for nombre_metrica, valor in metricas.items():
+        # IMPORTANTE: Solo procesar valores numéricos
+        try:
+            valor_numerico = float(valor)
+        except (ValueError, TypeError):
+            # Si no es numérico, guardar como string pero no incluir en promedios
+            resultado['evaluaciones'][nombre_metrica] = valor
+            continue
+        
+        # Normalizar el nombre de la métrica
+        nombre_normalizado = nombre_metrica.lower().replace(' ', '_').replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+        
+        # Guardar la evaluación original (numérica)
+        resultado['evaluaciones'][nombre_metrica] = valor_numerico
+        
+        # Buscar en qué categoría encaja
+        metrica_clasificada = False
+        
+        for categoria, lista_metricas in mapeo_posicion.items():
+            for metrica_esperada in lista_metricas:
+                # Comparación flexible
+                if (metrica_esperada in nombre_normalizado or 
+                    nombre_normalizado in metrica_esperada or
+                    son_metricas_similares(nombre_normalizado, metrica_esperada)):
+                    
+                    metricas_clasificadas[categoria].append(valor_numerico)
+                    resultado['categorias'][categoria][nombre_metrica] = valor_numerico
+                    metrica_clasificada = True
+                    break
+            
+            if metrica_clasificada:
+                break
+        
+        # Si no se pudo clasificar, intentar por palabras clave generales
+        if not metrica_clasificada:
+            if any(keyword in nombre_normalizado for keyword in ['pase', 'control', 'toque', 'tecnica', 'regate', 'centro', 'tiro']):
+                metricas_clasificadas['tecnicos'].append(valor_numerico)
+                resultado['categorias']['tecnicos'][nombre_metrica] = valor_numerico
+            elif any(keyword in nombre_normalizado for keyword in ['posicion', 'tactica', 'vision', 'lectura', 'marca', 'cobertura']):
+                metricas_clasificadas['tacticos'].append(valor_numerico)
+                resultado['categorias']['tacticos'][nombre_metrica] = valor_numerico
+            elif any(keyword in nombre_normalizado for keyword in ['velocidad', 'fuerza', 'resistencia', 'fisico', 'salto', 'potencia']):
+                metricas_clasificadas['fisicos'].append(valor_numerico)
+                resultado['categorias']['fisicos'][nombre_metrica] = valor_numerico
+            elif any(keyword in nombre_normalizado for keyword in ['liderazgo', 'concentracion', 'personalidad', 'confianza', 'presion', 'mental']):
+                metricas_clasificadas['mentales'].append(valor_numerico)
+                resultado['categorias']['mentales'][nombre_metrica] = valor_numerico
+            else:
+                # Si no encaja en ninguna, ponerla en técnicos por defecto
+                metricas_clasificadas['tecnicos'].append(valor_numerico)
+                resultado['categorias']['tecnicos'][nombre_metrica] = valor_numerico
+    
+    # Calcular promedios por categoría (solo con valores numéricos)
+    for categoria in ['tecnicos', 'tacticos', 'fisicos', 'mentales']:
+        valores = metricas_clasificadas[categoria]
+        if valores:
+            resultado['promedios'][categoria] = round(sum(valores) / len(valores), 2)
+        else:
+            # Si no hay valores, usar un promedio basado en otras categorías o un valor por defecto
+            otros_promedios = [p for c, p in resultado['promedios'].items() if c != categoria and p > 0]
+            if otros_promedios:
+                resultado['promedios'][categoria] = round(sum(otros_promedios) / len(otros_promedios), 2)
+            else:
+                resultado['promedios'][categoria] = 5.0  # Valor neutro por defecto
+    
+    # Añadir metadatos adicionales
+    resultado['num_metricas_evaluadas'] = len([v for v in metricas.values() if isinstance(v, (int, float))])
+    resultado['timestamp'] = pd.Timestamp.now().isoformat()
+    
+    # Validación: asegurar que al menos tengamos algunos promedios válidos
+    promedios_validos = [p for p in resultado['promedios'].values() if p > 0]
+    if not promedios_validos:
+        # Fallback: usar la nota general si está disponible
+        nota_general = 5.0
+        for k, v in metricas.items():
+            if 'nota' in k.lower() and isinstance(v, (int, float)):
+                nota_general = v
+                break
+        
+        for categoria in ['tecnicos', 'tacticos', 'fisicos', 'mentales']:
+            resultado['promedios'][categoria] = nota_general
+    
+    return resultado
+
+def son_metricas_similares(metrica1, metrica2):
+    """
+    Compara si dos métricas son similares usando técnicas de comparación flexible
+    """
+    # Eliminar caracteres comunes que pueden variar
+    m1 = metrica1.replace('_', '').replace('-', '').replace(' ', '')
+    m2 = metrica2.replace('_', '').replace('-', '').replace(' ', '')
+    
+    # Comparación directa
+    if m1 == m2:
+        return True
+    
+    # Una está contenida en la otra
+    if m1 in m2 or m2 in m1:
+        return True
+    
+    # Comparar por partes significativas
+    partes1 = set(metrica1.split('_'))
+    partes2 = set(metrica2.split('_'))
+    
+    # Si comparten al menos 50% de las partes
+    interseccion = partes1.intersection(partes2)
+    if len(interseccion) >= len(partes1) * 0.5 or len(interseccion) >= len(partes2) * 0.5:
+        return True
+    
+    return False
 
 def obtener_clase_posicion(posicion):
     """Devuelve la clase CSS según la posición"""
@@ -761,146 +1008,160 @@ def guardar_evaluacion_temporal(player, partido, posicion_real):
         st.session_state.evaluaciones_guardadas = {}
     
     st.session_state.evaluaciones_guardadas[eval_id] = evaluacion_completa
-
-
-def guardar_informe_final_campo(player, partido, posicion_real):
-    """Prepara y guarda el informe final en la base de datos"""    
+    
+def guardar_informe_final_campo(player, partido, posicion_real, debug=True):
+    """
+    Prepara y guarda el informe final en la base de datos - VERSIÓN CON DEBUG
+    """
     try:
-        # Calcular estadísticas
-        total_acciones = (st.session_state.acciones_partido['positivas'] + 
-                         st.session_state.acciones_partido['neutras'] + 
-                         st.session_state.acciones_partido['negativas'])
-        
-        if total_acciones > 0:
-            porcentaje_positivas = (st.session_state.acciones_partido['positivas'] / total_acciones) * 100
+        if debug:
+            print("\n=== DEBUG GUARDAR INFORME CAMPO ===")
+            print(f"🟢 Jugador recibido: {json.dumps(player, indent=4, ensure_ascii=False)}")
+            print(f"🟢 Partido recibido: {json.dumps(partido, indent=4, ensure_ascii=False)}")
+
+        # === 1. Obtener datos de BeSoccer si hay URL ===
+        datos_besoccer = None
+        if player.get('url_besoccer'):
+            try:
+                from utils.besoccer_scraper import BeSoccerScraper
+                scraper = BeSoccerScraper()
+                if debug:
+                    print(f"🔍 Scrapeando BeSoccer para {player['url_besoccer']} ...")
+                datos_besoccer = scraper.obtener_datos_perfil_jugador(player['url_besoccer'])
+                
+                if debug and datos_besoccer:
+                    print(f"✅ Datos BeSoccer obtenidos: {json.dumps(datos_besoccer, indent=4, ensure_ascii=False)}")
+            except Exception as e:
+                print(f"⚠️ No se pudieron obtener datos de BeSoccer: {e}")
         else:
-            porcentaje_positivas = 0
-        
-        # Preparar observaciones mejoradas
+            if debug:
+                print("⚠️ Jugador SIN url_besoccer, no se ejecuta scraper.")
+
+        # === 2. Calcular estadísticas de acciones ===
+        total_acciones = (
+            st.session_state.acciones_partido['positivas'] + 
+            st.session_state.acciones_partido['neutras'] + 
+            st.session_state.acciones_partido['negativas']
+        )
+        porcentaje_positivas = (st.session_state.acciones_partido['positivas'] / total_acciones * 100) if total_acciones > 0 else 0
+
+        # === 3. Preparar observaciones ===
         observaciones = f"""
 EVALUACIÓN EN CAMPO - {posicion_real}
-
-Acciones registradas:
 - Positivas: {st.session_state.acciones_partido['positivas']} ({porcentaje_positivas:.1f}%)
 - Neutras: {st.session_state.acciones_partido['neutras']}
 - Negativas: {st.session_state.acciones_partido['negativas']}
-
-EVENTOS DESTACADOS:
 """
-        
-        # Añadir eventos más relevantes
-        eventos_relevantes = st.session_state.acciones_partido['eventos'][-10:]  # Últimos 10 eventos
-        for evento in eventos_relevantes:
+        # Añadir eventos
+        for evento in st.session_state.acciones_partido['eventos'][-10:]:
             observaciones += f"\n- Min {evento['minuto']}: {evento['nota']} [{evento['tipo'].upper()}]"
-        
-        observaciones += f"\n\nObservaciones generales: {st.session_state.evaluacion_temporal.get('obs_general', 'Sin observaciones adicionales')}"
-        
-        # Recopilar fortalezas y debilidades basadas en evaluación
-        fortalezas = []
-        debilidades = []
-        aspectos_evaluados = []
+
+        nota_general = st.session_state.evaluacion_temporal.get('nota_general', 5)
+        recomendacion = 'fichar' if nota_general >= 7 else 'seguir_observando' if nota_general >= 5 else 'descartar'
+        potencial = 'alto' if nota_general >= 7 else 'medio' if nota_general >= 5 else 'bajo'
+
+        # Extraer métricas de la evaluación rápida
+        metricas_planas = {}
+        metricas_cualitativas = {}
         
         for key, value in st.session_state.evaluacion_temporal.items():
             if key.startswith('aspecto_'):
-                aspecto_nombre = key.replace('aspecto_', '')
-                if value >= 7:
-                    fortalezas.append(f"{aspecto_nombre}: {value}/10")
-                elif value <= 4:
-                    debilidades.append(f"{aspecto_nombre}: {value}/10")
-                aspectos_evaluados.append(f"{aspecto_nombre}: {value}")
+                nombre_aspecto = key.replace('aspecto_', '')
+                # Verificar si es numérico
+                if isinstance(value, (int, float)):
+                    metricas_planas[nombre_aspecto] = value
+                else:
+                    metricas_cualitativas[nombre_aspecto] = value
         
-        # Determinar recomendación basada en nota general y rendimiento
-        nota_general = st.session_state.evaluacion_temporal.get('nota_general', 5)
+        # === NUEVO: Calcular métricas estructuradas ===
+        metricas_estructuradas = calcular_metricas_estructuradas(
+            metricas_planas,  # Solo valores numéricos
+            posicion_real,
+            tipo_evaluacion='campo'
+        )
         
-        # Ajustar nota ligeramente según el rendimiento en campo
-        if porcentaje_positivas > 70:
-            nota_ajustada = min(10, nota_general + 0.5)
-        elif porcentaje_positivas < 30:
-            nota_ajustada = max(1, nota_general - 0.5)
-        else:
-            nota_ajustada = nota_general
+        # Añadir cualquier métrica cualitativa al resultado
+        if metricas_cualitativas:
+            metricas_estructuradas['evaluaciones_cualitativas'] = metricas_cualitativas
         
-        if nota_ajustada >= 7:
-            recomendacion = 'fichar'
-        elif nota_ajustada >= 5:
-            recomendacion = 'seguir_observando'
-        else:
-            recomendacion = 'descartar'
+        if debug:
+            print(f"📊 Métricas estructuradas calculadas:")
+            print(f"   - Promedios: {metricas_estructuradas['promedios']}")
+            print(f"   - Categorías con métricas: {list(metricas_estructuradas['categorias'].keys())}")
+            print(f"   - Métricas numéricas: {len(metricas_planas)}")
+            print(f"   - Métricas cualitativas: {len(metricas_cualitativas)}")
 
-        # Si hay alguna clave con 'img' o 'image', mostrarla
-        for key in player.keys():
-            if 'img' in key.lower() or 'image' in key.lower() or 'foto' in key.lower():
-                print(f"   {key}: '{player[key]}'")
-        
-        # Preparar datos para partido_model
+        # === 4. Preparar datos del informe ===
         informe_data = {
             'partido_id': partido['id'],
             'jugador_nombre': player['nombre'],
             'equipo': player['equipo'],
-            'posicion': posicion_real,  # Usamos la posición real, no la de BeSoccer
+            'posicion': posicion_real,
             'scout_usuario': current_user['usuario'],
-            'nota_general': nota_ajustada,
-            'potencial': 'medio',  # Por defecto en evaluación de campo
+            'tipo_evaluacion': 'campo',
+            'nota_general': nota_general,
+            'potencial': potencial,
             'recomendacion': recomendacion,
             'observaciones': observaciones.strip(),
             'minutos_observados': st.session_state.get('minuto_actual', 90),
-            'fortalezas': ', '.join(fortalezas) if fortalezas else 'Por determinar en análisis completo',
-            'debilidades': ', '.join(debilidades) if debilidades else 'Por determinar en análisis completo',
-            'tipo_evaluacion': 'campo',
-            'imagen_url': player.get('imagen_url', '')
+            'imagen_url': player.get('imagen_url', ''),
+            'url_besoccer': player.get('url_besoccer', ''),
+            'edad': player.get('edad'),
+            'nacionalidad': player.get('nacionalidad', ''),
+            'liga_actual': player.get('liga', ''),
+            'escudo_equipo': partido.get('escudo_equipo', partido.get('escudo_local', '')),
+            'valor_mercado': datos_besoccer.get('valor_mercado', '') if datos_besoccer else '',
+            'metricas': json.dumps(metricas_estructuradas)  # Guardamos como JSON
         }
-        
-        print(f"DEBUG - informe_data: {informe_data}")
-        print(f"DEBUG - Llamando a crear_informe_scouting...")
-        
-        # NUEVO: Guardar el partido antes del informe
+
+        if debug:
+            print(f"📤 Datos preparados para informe: {json.dumps(informe_data, indent=4, ensure_ascii=False)}")
+
+        # === 5. Guardar en la base de datos ===
         partido_model.guardar_partido_si_no_existe(partido)
-        
-        # Llamar a partido_model para guardar el informe
+
+        print("\n=== DEBUG METRICAS ===")
+        print(json.dumps(informe_data.get("metricas", {}), indent=4, ensure_ascii=False))
+        print("=======================\n")
+
         informe_id = partido_model.crear_informe_scouting(informe_data)
-        print(f"DEBUG - Informe creado con ID: {informe_id}")
-        
-        # AHORA SÍ: Después de guardar el informe exitosamente, actualizamos/creamos el jugador en Base Personal
-        if DB_HELPERS_DISPONIBLE and informe_id:
-            try:
-                print("💾 Actualizando jugador en Base Personal DESPUÉS de guardar informe...")
-                
-                # Preparar datos completos del jugador
-                jugador_data = {
-                    'nombre': player['nombre'],
-                    'numero': player.get('numero', '?'),
-                    'posicion': posicion_real,  # Usar la posición real evaluada
-                    'imagen_url': player.get('imagen_url', ''),
-                    'es_titular': True  # Si lo evaluamos, asumimos que jugó
-                }
-                
-                # Preparar datos del partido con información correcta
-                partido_data = {
-                    **partido,
-                    'equipo': player['equipo'],
-                    'escudo_equipo': partido.get('escudo_local', '') if player['equipo'] == partido['equipo_local'] else partido.get('escudo_visitante', ''),
-                    'nota_evaluacion': nota_ajustada,  # Añadir la nota de la evaluación
-                    'recomendacion': recomendacion
-                }
-                
-                # Actualizar/crear jugador con la información del informe
-                from utils.db_helpers import actualizar_jugador_desde_informe
-                actualizar_jugador_desde_informe(jugador_data, partido_data, current_user['usuario'], informe_id)
-                
-                print("✅ Jugador actualizado en Base Personal con datos del informe")
-                
-            except Exception as e:
-                print(f"⚠️ Error actualizando Base Personal: {e}")
-                # No fallar si hay error al actualizar base personal
-        
-        return True
-        
+
+        if informe_id and DB_HELPERS_DISPONIBLE:
+            from utils.db_helpers import actualizar_jugador_desde_informe
+            jugador_data = {
+                'nombre': player['nombre'],
+                'numero': player.get('numero', '?'),
+                'posicion': posicion_real,
+                'imagen_url': player.get('imagen_url', ''),
+                'escudo_equipo': partido.get('escudo_equipo', partido.get('escudo_local', '')),
+                'edad': datos_besoccer.get('edad') if datos_besoccer else player.get('edad'),
+                'nacionalidad': datos_besoccer.get('nacionalidad') if datos_besoccer else player.get('nacionalidad'),
+                'valor_mercado': datos_besoccer.get('valor_mercado', '') if datos_besoccer else '',
+                'url_besoccer': player.get('url_besoccer', '')
+            }
+
+            if debug:
+                print(f"📥 Datos enviados a BD: {json.dumps(jugador_data, indent=4, ensure_ascii=False)}")
+
+            partido_data = {
+                **partido,
+                'equipo': player['equipo'],
+                'nota_evaluacion': nota_general,
+                'recomendacion': recomendacion
+            }
+
+            actualizar_jugador_desde_informe(jugador_data, partido_data, current_user['usuario'], informe_id, datos_besoccer)
+
+        if debug:
+            print("=== FIN DEBUG GUARDAR INFORME CAMPO ===\n")
+
+        return bool(informe_id)
+
     except Exception as e:
-        print(f"Error al guardar informe: {str(e)}")
+        print(f"❌ Error en guardar_informe_final_campo: {e}")
         import traceback
         traceback.print_exc()
         return False
-    
 
 def limpiar_estados_evaluacion():
     """Limpia los estados temporales después de guardar"""
@@ -1658,51 +1919,77 @@ def obtener_aspectos_evaluacion_completa(posicion):
     # Si la posición no está definida, usar aspectos genéricos de Mediocentro
     return aspectos_por_posicion.get(posicion, aspectos_por_posicion['Mediocentro'])
 
-
 def guardar_informe_final_completo(player, partido, posicion_real):
-    """Prepara y guarda el informe final de evaluación completa en la base de datos"""
+    """Prepara y guarda el informe de evaluación completa - VERSIÓN DEBUG JSON"""
     try:
-        # Obtener todos los datos de la evaluación
+        print("\n=== DEBUG MODO COMPLETO ===")
+        print(f"Jugador: {player}")
+        print(f"Partido: {partido}")
+        print(f"Posición: {posicion_real}")
+
+        # === Obtener datos del scraper BeSoccer ===
+        datos_besoccer = None
+        if player.get('url_besoccer'):
+            try:
+                from utils.besoccer_scraper import BeSoccerScraper
+                scraper = BeSoccerScraper()
+                print(f"🔍 Obteniendo datos BeSoccer para {player['nombre']}...")
+                datos_besoccer = scraper.obtener_datos_perfil_jugador(player['url_besoccer'])
+                print(f"Datos BeSoccer: {json.dumps(datos_besoccer, indent=4, ensure_ascii=False)}")
+            except Exception as e:
+                print(f"⚠️ Error BeSoccer: {e}")
+
+        # Obtener datos de la evaluación
         eval_data = st.session_state.eval_completa
+        print(f"Evaluación completa (estado): {json.dumps(eval_data, indent=4, ensure_ascii=False)}")
+
+        # === NUEVO: Preparar métricas planas para estructura ===
+        metricas_planas = {}
+        metricas_cualitativas = {}
+
+        # Recopilar todas las métricas evaluadas
+        for categoria in ['datos_tecnicos', 'datos_tacticos', 'datos_fisicos', 'datos_psicologicos']:
+            if categoria in eval_data:
+                for metrica, valor in eval_data[categoria].items():
+                    # Separar métricas numéricas de cualitativas
+                    if isinstance(valor, (int, float)):
+                        metricas_planas[metrica] = valor
+                    else:
+                        metricas_cualitativas[metrica] = valor
         
-        # Calcular promedios por categoría
-        datos_tecnicos = eval_data.get('datos_tecnicos', {})
-        datos_tacticos = eval_data.get('datos_tacticos', {})
-        datos_fisicos = eval_data.get('datos_fisicos', {})
-        datos_psicologicos = eval_data.get('datos_psicologicos', {})
+        # === Calcular métricas estructuradas ===
+        metricas_estructuradas = calcular_metricas_estructuradas(
+            metricas_planas,
+            posicion_real,
+            tipo_evaluacion='video_completo'
+        )
         
-        promedio_tecnico = sum(datos_tecnicos.values()) / len(datos_tecnicos) if datos_tecnicos else 5
-        promedio_tactico = sum(datos_tacticos.values()) / len(datos_tacticos) if datos_tacticos else 5
+        # Añadir las métricas cualitativas al JSON final
+        metricas_estructuradas['evaluaciones_cualitativas'] = metricas_cualitativas
         
-        # Para físicos y psicológicos, filtrar solo valores numéricos
-        valores_fisicos_num = [v for v in datos_fisicos.values() if isinstance(v, int)]
-        valores_psico_num = [v for v in datos_psicologicos.values() if isinstance(v, int)]
-        
-        promedio_fisico = sum(valores_fisicos_num) / len(valores_fisicos_num) if valores_fisicos_num else 5
-        promedio_psicologico = sum(valores_psico_num) / len(valores_psico_num) if valores_psico_num else 5
-        
-        # Obtener datos generales
+        print(f"📊 Métricas estructuradas calculadas:")
+        print(f"   - Promedios: {metricas_estructuradas['promedios']}")
+        print(f"   - Total métricas numéricas: {len(metricas_planas)}")
+        print(f"   - Total métricas cualitativas: {len(metricas_cualitativas)}")
+
+        # Datos generales
         nota_general = eval_data.get('nota_general', 5)
         decision_final = eval_data.get('decision_final', '📘 Seguir observando')
         resumen_scout = eval_data.get('resumen_scout', '')
-        
-        # Mapear decisión a recomendación
+
+        # Mapear decisión
         mapeo_decision = {
             "📗 Fichar YA": "fichar",
             "📘 Seguir observando": "seguir_observando",
             "📙 Lista de espera": "seguir_observando",
             "📕 Descartar": "descartar"
         }
-        
-        # Determinar potencial basado en edad y nota
-        if nota_general >= 8:
-            potencial = "alto"
-        elif nota_general >= 6:
-            potencial = "medio"
-        else:
-            potencial = "bajo"
-        
-        # Preparar observaciones completas
+        recomendacion = mapeo_decision.get(decision_final, 'seguir_observando')
+
+        # Determinar potencial
+        potencial = "alto" if nota_general >= 8 else "medio" if nota_general >= 6 else "bajo"
+
+        # Construir observaciones
         observaciones_completas = f"""
 ANÁLISIS COMPLETO CON VIDEO
 Posición evaluada: {posicion_real}
@@ -1712,132 +1999,52 @@ Contexto: {eval_data.get('contexto_partido', 'N/A')}
 
 RESUMEN EJECUTIVO:
 {resumen_scout}
-
-EVALUACIÓN POR ÁREAS:
-- Técnica: {promedio_tecnico:.1f}/10
-- Táctica: {promedio_tactico:.1f}/10
-- Física: {promedio_fisico:.1f}/10 ({datos_fisicos.get('ritmo_juego', 'N/A')} / {datos_fisicos.get('aguanta_90min', 'N/A')})
-- Mental: {promedio_psicologico:.1f}/10
-
-OBSERVACIONES TÉCNICAS:
-{eval_data.get('observaciones', {}).get('tecnicas', 'Sin observaciones')}
-
-OBSERVACIONES TÁCTICAS:
-{eval_data.get('observaciones', {}).get('tacticas', 'Sin observaciones')}
-
-OBSERVACIONES FÍSICAS:
-{eval_data.get('observaciones', {}).get('fisicas', 'Sin observaciones')}
-
-OBSERVACIONES MENTALES:
-{eval_data.get('observaciones', {}).get('psicologicas', 'Sin observaciones')}
-
-MOMENTOS CLAVE:
-{eval_data.get('momentos_clave', 'Sin momentos destacados')}
-
-DECISIÓN: {decision_final}
-PRECIO MÁXIMO: {eval_data.get('precio_maximo', 'No especificado')}
-PRIORIDAD: {eval_data.get('prioridad_fichaje', 'Media')}
 """
-        
-        # Identificar fortalezas y debilidades
-        fortalezas = []
-        debilidades = []
-        
-        # Analizar todos los aspectos evaluados
-        todos_aspectos = {
-            **datos_tecnicos,
-            **datos_tacticos,
-            **{k: v for k, v in datos_fisicos.items() if isinstance(v, int)},
-            **{k: v for k, v in datos_psicologicos.items() if isinstance(v, int)}
-        }
-        
-        for aspecto, valor in todos_aspectos.items():
-            if valor >= 7:
-                fortalezas.append(f"{aspecto} ({valor}/10)")
-            elif valor <= 4:
-                debilidades.append(f"{aspecto} ({valor}/10)")
-        
-        # Preparar datos para guardar - mapear a campos de BD existentes
+
+        # Preparar datos para guardar
         informe_data = {
             'partido_id': partido['id'],
             'jugador_nombre': player['nombre'],
             'equipo': player['equipo'],
-            'posicion': posicion_real,  # Usar la posición real evaluada
+            'posicion': posicion_real,
             'scout_usuario': current_user['usuario'],
+            'tipo_evaluacion': 'video_completo',
             'nota_general': nota_general,
             'potencial': potencial,
-            'recomendacion': mapeo_decision.get(decision_final, 'seguir_observando'),
+            'recomendacion': recomendacion,
             'observaciones': observaciones_completas,
-            'minutos_observados': eval_data.get('tiempo_analisis', 45),
-            'fortalezas': ', '.join(fortalezas[:5]) if fortalezas else 'Ver evaluación detallada',
-            'debilidades': ', '.join(debilidades[:5]) if debilidades else 'Ver evaluación detallada',
-            'tipo_evaluacion': 'video_completo',
             'imagen_url': player.get('imagen_url', ''),
-            
-            # Mapear evaluaciones a campos existentes de BD
-            'control_balon': datos_tecnicos.get('Control orientado', datos_tecnicos.get('Control y primer toque', 5)),
-            'primer_toque': datos_tecnicos.get('Primer toque', datos_tecnicos.get('Control y primer toque', 5)),
-            'pase_corto': datos_tecnicos.get('Pase corto', datos_tecnicos.get('Pase corto/medio', 5)),
-            'pase_largo': datos_tecnicos.get('Pase largo', 5),
-            'regate': datos_tecnicos.get('Regate', datos_tecnicos.get('Regate/Conducción', 5)),
-            'finalizacion': datos_tecnicos.get('Finalización', datos_tecnicos.get('Finalización pie derecho', 5)),
-            
-            'vision_juego': datos_tacticos.get('Visión juego', datos_tacticos.get('Lectura del juego', 5)),
-            'posicionamiento': datos_tacticos.get('Posicionamiento', 5),
-            'marcaje': datos_tacticos.get('Marcaje hombre', datos_tacticos.get('Marcaje', 5)),
-            'pressing': datos_tacticos.get('Pressing', datos_tacticos.get('Pressing inteligente', 5)),
-            'transiciones': datos_tacticos.get('Transición def-atq', datos_tacticos.get('Movimientos sin balón', 5)),
-            
-            'velocidad': datos_fisicos.get('Velocidad', datos_fisicos.get('Velocidad punta', 5)),
-            'resistencia': datos_fisicos.get('Resistencia', 5),
-            'fuerza': datos_fisicos.get('Fuerza', 5),
-            'salto': datos_fisicos.get('Salto', 5),
-            'agilidad': datos_fisicos.get('Agilidad', 5),
-            
-            'concentracion': datos_psicologicos.get('Concentración', 5),
-            'liderazgo': datos_psicologicos.get('Liderazgo', 5),
-            'comunicacion': datos_psicologicos.get('Comunicación', 5),
-            'presion': datos_psicologicos.get('Presión', 5),
-            'decision': datos_tacticos.get('Toma de decisiones', datos_psicologicos.get('Decisión', 5))
+            'url_besoccer': player.get('url_besoccer', ''),
+            'edad': player.get('edad'),
+            'nacionalidad': player.get('nacionalidad', ''),
+            'liga_actual': player.get('liga', ''),
+            "metricas": json.dumps(metricas_estructuradas)
         }
-        
-        # Guardar el partido si no existe
+
+        print("=== INFORME_DATA FINAL ===")
+        print(json.dumps(informe_data, indent=4, ensure_ascii=False))
+
+        # Guardar partido
         partido_model.guardar_partido_si_no_existe(partido)
-        
-        # Guardar el informe
+
+        print("\n=== DEBUG METRICAS ===")
+        print(json.dumps(informe_data.get("metricas", {}), indent=4, ensure_ascii=False))
+        print("=======================\n")
+
+        # Guardar informe
         informe_id = partido_model.crear_informe_scouting(informe_data)
-        
-        if informe_id:
-            # Actualizar base personal si está disponible
-            if DB_HELPERS_DISPONIBLE:
-                try:
-                    jugador_data = {
-                        'nombre': player['nombre'],
-                        'numero': player.get('numero', '?'),
-                        'posicion': posicion_real,
-                        'imagen_url': player.get('imagen_url', ''),
-                        'es_titular': True
-                    }
-                    
-                    partido_data = {
-                        **partido,
-                        'equipo': player['equipo'],
-                        'nota_evaluacion': nota_general,
-                        'recomendacion': mapeo_decision.get(decision_final, 'seguir_observando')
-                    }
-                    
-                    from utils.db_helpers import actualizar_jugador_desde_informe
-                    actualizar_jugador_desde_informe(jugador_data, partido_data, current_user['usuario'], informe_id)
-                    
-                except Exception as e:
-                    print(f"⚠️ Error actualizando Base Personal: {e}")
-            
-            return True
-        
-        return False
-        
+        print(f"✅ Informe guardado con ID: {informe_id}")
+
+        # Actualizar base personal
+        if informe_id and DB_HELPERS_DISPONIBLE:
+            from utils.db_helpers import actualizar_jugador_desde_informe
+            print("🔄 Actualizando BD Personal...")
+            actualizar_jugador_desde_informe(player, partido, current_user['usuario'], informe_id, datos_besoccer)
+
+        return bool(informe_id)
+
     except Exception as e:
-        print(f"Error al guardar informe completo: {str(e)}")
+        print(f"❌ Error en guardar_informe_final_completo: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -1887,7 +2094,7 @@ if st.session_state.modo_vista == 'lista_partidos':
         nueva_fecha = st.date_input(
             "Fecha:",
             value=st.session_state.fecha_seleccionada,
-            min_value=date.today() - timedelta(days=7),
+            min_value=date.today() - timedelta(days=90),
             max_value=date.today() + timedelta(days=14),
             key="selector_fecha_partidos"
         )
@@ -2163,12 +2370,14 @@ elif st.session_state.modo_vista == 'observacion':
                         st.session_state.jugador_evaluando = {
                             'nombre': nombre,
                             'equipo': partido['equipo_local'],
+                            'escudo_equipo': partido.get('escudo_local', ''),
                             'posicion': posicion,
                             'numero': numero,
                             'partido_id': partido['id'],
                             'es_objetivo': es_objetivo,
                             'datos_objetivo': datos_objetivo or {},
-                            'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
+                            'imagen_url': imagen_url,  # AÑADIDO: pasar imagen_url
+                            'url_besoccer': jugador.get('url_besoccer', '')  # La URL viene del JSON-LD
                         }
                         st.rerun()
                 
@@ -2213,12 +2422,14 @@ elif st.session_state.modo_vista == 'observacion':
                                     st.session_state.jugador_evaluando = {
                                         'nombre': nombre,
                                         'equipo': partido['equipo_local'],
+                                        'escudo_equipo': partido.get('escudo_local', ''),
                                         'posicion': posicion,
                                         'numero': numero,
                                         'partido_id': partido['id'],
                                         'es_objetivo': es_objetivo,
                                         'datos_objetivo': datos_objetivo or {},
-                                        'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
+                                        'imagen_url': imagen_url,  # AÑADIDO: pasar imagen_url
+                                        'url_besoccer': jugador.get('url_besoccer', '')  # La URL viene del JSON-LD
                                     }
                                     st.rerun()
             
@@ -2270,12 +2481,14 @@ elif st.session_state.modo_vista == 'observacion':
                         st.session_state.jugador_evaluando = {
                             'nombre': nombre,
                             'equipo': partido['equipo_visitante'],
+                            'escudo_equipo': partido.get('escudo_visitante', ''),
                             'posicion': posicion,
                             'numero': numero,
                             'partido_id': partido['id'],
                             'es_objetivo': es_objetivo,
                             'datos_objetivo': datos_objetivo or {},
-                            'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
+                            'imagen_url': imagen_url,  # AÑADIDO: pasar imagen_url
+                            'url_besoccer': jugador.get('url_besoccer', '')  # La URL viene del JSON-LD
                         }
                         st.rerun()
                 
@@ -2320,12 +2533,14 @@ elif st.session_state.modo_vista == 'observacion':
                                     st.session_state.jugador_evaluando = {
                                         'nombre': nombre,
                                         'equipo': partido['equipo_visitante'],
+                                        'escudo_equipo': partido.get('escudo_visitante', ''),
                                         'posicion': posicion,
                                         'numero': numero,
                                         'partido_id': partido['id'],
                                         'es_objetivo': es_objetivo,
                                         'datos_objetivo': datos_objetivo or {},
-                                        'imagen_url': imagen_url  # AÑADIDO: pasar imagen_url
+                                        'imagen_url': imagen_url,  # AÑADIDO: pasar imagen_url
+                                        'url_besoccer': jugador.get('url_besoccer', '')  # La URL viene del JSON-LD
                                     }
                                     st.rerun()
             

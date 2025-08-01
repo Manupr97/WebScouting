@@ -6,7 +6,10 @@ from plotly.subplots import make_subplots
 import numpy as np
 import sys
 import os
-
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+import matplotlib.patches as patches
+from mplsoccer import Radar, grid
 
 # Añadir el directorio raíz al path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +19,17 @@ sys.path.append(parent_dir)
 # Importar modelos necesarios
 from common.login import LoginManager
 from models.wyscout_model import WyscoutModel
+from utils.normalizacion import normalizar_nombre_metrica
+from utils.normalizacion import generar_o_cargar_mapping_wyscout
+
+excel_path = os.path.join(parent_dir, "data", "wyscout_LaLiga_limpio.xlsx")
+json_path = os.path.join(parent_dir, "utils", "mapping_wyscout.json")
+mapping_wyscout = generar_o_cargar_mapping_wyscout(excel_path, json_path)
+
+# Diccionario: nombre bonito -> nombre real (cualquier lista de métricas)
+def build_metrics_label_dict(metrics_list):
+    return {normalizar_nombre_metrica(m): m for m in metrics_list}
+
 
 # Configuración de la página
 st.set_page_config(
@@ -148,9 +162,10 @@ def load_and_clean_data():
     detected_columns = {
         'player': 'jugador',
         'team': 'equipo_durante_el_período_seleccionado',
-        'position': 'pos_principal', 
+        'position': 'pos_principal',
         'age': 'edad'
     }
+
     
     # Verificar que las columnas existen
     for key, col_name in detected_columns.items():
@@ -196,6 +211,222 @@ def format_value(value):
             return f"{num_value:.1f}"
     except:
         return str(value)
+    
+def create_individual_radar(player_data, metrics_values, metrics_labels, player_info, 
+                          percentiles=True, color_scheme='#007bff'):
+    """
+    Crea un radar individual usando mplsoccer con colores corporativos
+    """
+    # Procesar etiquetas para evitar solapamiento
+    processed_labels = []
+    for label in metrics_labels:
+        if len(label) > 15:
+            words = label.split()
+            if len(words) > 2:
+                mid = len(words) // 2
+                label = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+        processed_labels.append(label)
+    
+    # Configurar los límites (0-100 para percentiles)
+    low = [0] * len(processed_labels)
+    high = [100] * len(processed_labels)
+    
+    # Crear el objeto Radar
+    radar = Radar(processed_labels, low, high,
+                  num_rings=4,
+                  ring_width=1, 
+                  center_circle_radius=1)
+    
+    # Crear la figura usando grid de mplsoccer
+    fig, axs = grid(figheight=10, grid_height=0.88, title_height=0.08, 
+                    endnote_height=0.04, title_space=0, endnote_space=0, 
+                    grid_key='radar', axis=False)
+    
+    # Configurar y dibujar el radar
+    radar.setup_axis(ax=axs['radar'])
+    
+    # Anillos del radar con colores suaves
+    rings_inner = radar.draw_circles(ax=axs['radar'], 
+                                    facecolor='#f8f9fa', 
+                                    edgecolor='#dee2e6',
+                                    linewidth=0.8)
+    
+    # Dibujar el radar del jugador con color corporativo
+    radar_output = radar.draw_radar(metrics_values, ax=axs['radar'],
+                                   kwargs_radar={'facecolor': color_scheme, 
+                                               'alpha': 0.3,
+                                               'edgecolor': color_scheme,
+                                               'linewidth': 2.5},
+                                   kwargs_rings={'facecolor': '#ffffff'})
+    
+    radar_poly, rings_outer, vertices = radar_output
+    
+    # Añadir etiquetas de rango con estilo corporativo
+    range_labels = radar.draw_range_labels(ax=axs['radar'], fontsize=9, 
+                                          color='#6c757d')
+    
+    # Añadir etiquetas de parámetros con color corporativo oscuro
+    param_labels = radar.draw_param_labels(ax=axs['radar'], fontsize=10, 
+                                          color='#24282a', weight='medium')
+    
+    # Añadir puntos en los vértices con color corporativo
+    axs['radar'].scatter(vertices[:, 0], vertices[:, 1], 
+                        c=color_scheme, edgecolors='white', 
+                        s=100, zorder=5, linewidth=2)
+    
+    # Añadir valores en cada punto
+    for i, (vertex, value) in enumerate(zip(vertices, metrics_values)):
+        axs['radar'].text(vertex[0], vertex[1] + 0.05, f'{value:.0f}%',
+                         ha='center', va='bottom', size=8,
+                         bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                                  alpha=0.8, edgecolor='none'))
+    
+    # Título con color corporativo oscuro
+    axs['title'].text(0.5, 0.7, player_info['nombre'], fontsize=20,
+                     weight='bold', ha='center', va='center', color='#24282a')
+    
+    # Información del jugador
+    info_text = f"{player_info['equipo']} | {player_info['posicion']} | {player_info.get('edad', 'N/A')} años"
+    axs['title'].text(0.5, 0.3, info_text, fontsize=13,
+                     ha='center', va='center', color='#495057')
+    
+    # Nota al pie con estilo sutil
+    axs['endnote'].text(0.5, 0.5, 'Datos: Wyscout LaLiga | Valores en percentiles', 
+                       fontsize=9, ha='center', va='center', 
+                       color='#6c757d', style='italic')
+    
+    return fig
+
+
+def create_comparison_radar(players_data, metrics_labels, max_players=5, 
+                          colors=None):
+    """
+    Crea un radar comparativo usando mplsoccer con colores corporativos
+    """
+    if colors is None:
+        # Paleta basada en colores corporativos
+        colors = ['#007bff', '#24282a', '#0056b3', '#dc3545', '#28a745']
+    
+    # Limitar jugadores
+    players_list = list(players_data.keys())[:max_players]
+    
+    # Procesar etiquetas
+    processed_labels = []
+    for label in metrics_labels:
+        if len(label) > 15:
+            words = label.split()
+            if len(words) > 2:
+                mid = len(words) // 2
+                label = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+        processed_labels.append(label)
+    
+    # Configurar límites
+    low = [0] * len(processed_labels)
+    high = [100] * len(processed_labels)
+    
+    # Crear el objeto Radar
+    radar = Radar(processed_labels, low, high,
+                  num_rings=4,
+                  ring_width=1,
+                  center_circle_radius=1)
+    
+    # Crear la figura
+    fig, axs = grid(figheight=11, grid_height=0.85, title_height=0.08,
+                    endnote_height=0.07, title_space=0, endnote_space=0,
+                    grid_key='radar', axis=False)
+    
+    # Configurar el radar
+    radar.setup_axis(ax=axs['radar'])
+    
+    # Anillos de fondo con colores suaves
+    rings_inner = radar.draw_circles(ax=axs['radar'], 
+                                    facecolor='#f8f9fa', 
+                                    edgecolor='#dee2e6',
+                                    linewidth=0.8)
+    
+    # Para comparación de 2 jugadores
+    if len(players_list) == 2:
+        player1_name = players_list[0]
+        player2_name = players_list[1]
+        
+        values1 = [players_data[player1_name].get(metric, 0) for metric in metrics_labels]
+        values2 = [players_data[player2_name].get(metric, 0) for metric in metrics_labels]
+        
+        # Dibujar comparación con colores corporativos
+        radar_output = radar.draw_radar_compare(
+            values1, values2, ax=axs['radar'],
+            kwargs_radar={'facecolor': colors[0], 'alpha': 0.3, 
+                         'edgecolor': colors[0], 'linewidth': 2.5},
+            kwargs_compare={'facecolor': colors[1], 'alpha': 0.3,
+                           'edgecolor': colors[1], 'linewidth': 2.5}
+        )
+        
+        radar_poly1, radar_poly2, vertices1, vertices2 = radar_output
+        
+        # Puntos en vértices con colores corporativos
+        axs['radar'].scatter(vertices1[:, 0], vertices1[:, 1],
+                           c=colors[0], edgecolors='white', 
+                           s=80, zorder=5, linewidth=2)
+        axs['radar'].scatter(vertices2[:, 0], vertices2[:, 1],
+                           c=colors[1], edgecolors='white', 
+                           s=80, zorder=5, linewidth=2)
+        
+        # Títulos para comparación con colores corporativos
+        axs['title'].text(0.15, 0.5, player1_name, fontsize=18,
+                         weight='bold', ha='left', va='center', color=colors[0])
+        axs['title'].text(0.85, 0.5, player2_name, fontsize=18,
+                         weight='bold', ha='right', va='center', color=colors[1])
+    
+    # Para 3 o más jugadores
+    else:
+        for idx, player_name in enumerate(players_list):
+            values = [players_data[player_name].get(metric, 0) for metric in metrics_labels]
+            
+            # Dibujar cada radar
+            radar_output = radar.draw_radar(values, ax=axs['radar'],
+                                          kwargs_radar={'facecolor': colors[idx % len(colors)], 
+                                                      'alpha': 0.25,
+                                                      'edgecolor': colors[idx % len(colors)],
+                                                      'linewidth': 2.5},
+                                          kwargs_rings={'facecolor': 'none'})
+            
+            radar_poly, rings, vertices = radar_output
+            
+            # Puntos con estilo corporativo
+            axs['radar'].scatter(vertices[:, 0], vertices[:, 1],
+                               c=colors[idx % len(colors)], edgecolors='white', 
+                               s=70, zorder=5, linewidth=2)
+    
+    # Etiquetas con colores corporativos
+    range_labels = radar.draw_range_labels(ax=axs['radar'], fontsize=9,
+                                          color='#6c757d')
+    param_labels = radar.draw_param_labels(ax=axs['radar'], fontsize=10,
+                                          color='#24282a', weight='medium')
+    
+    # Título general
+    if len(players_list) > 2 or len(players_list) == 1:
+        axs['title'].text(0.5, 0.5, 'Comparación de Jugadores', fontsize=20,
+                         weight='bold', ha='center', va='center', color='#24282a')
+    
+    # Leyenda en endnote con estilo corporativo
+    if len(players_list) > 2:
+        # Crear leyenda con colores
+        total_width = len(players_list) * 0.25
+        start_x = 0.5 - (total_width / 2)
+        
+        for idx, player in enumerate(players_list):
+            x_pos = start_x + (idx * 0.25) + 0.125
+            axs['endnote'].scatter(x_pos - 0.02, 0.5, c=colors[idx % len(colors)], 
+                                 s=120, zorder=5, edgecolors='white', linewidth=2)
+            axs['endnote'].text(x_pos, 0.5, player, fontsize=11,
+                               ha='left', va='center', color='#24282a', weight='medium')
+    else:
+        axs['endnote'].text(0.5, 0.5, 'Valores en percentiles | Datos: Wyscout LaLiga',
+                           fontsize=9, ha='center', va='center',
+                           color='#6c757d', style='italic')
+    
+    return fig
+
 
 # Definir métricas relevantes para scouting USANDO NOMBRES EXACTOS DEL DATASET
 SCOUTING_METRICS = {
@@ -240,6 +471,12 @@ SCOUTING_METRICS = {
 # Cargar datos
 with st.spinner("🔄 Cargando y procesando datos de Wyscout..."):
     df, detected_columns, summary, wyscout_model = load_and_clean_data()
+
+# Claves limpias para todo el flujo
+player_col = detected_columns['player']
+team_col = detected_columns['team']
+position_col = detected_columns['position']
+age_col = detected_columns['age']
 
 # Verificar si hay datos
 if df.empty:
@@ -475,48 +712,19 @@ filters = {
 with st.spinner("🔄 Aplicando filtros..."):
     df_filtered = apply_filters_advanced(df, filters)
 
-# Mostrar información de filtrado
-st.markdown("### 📊 Datos Filtrados")
-
-info_col1, info_col2, info_col3 = st.columns(3)
-with info_col1:
-    st.metric("📋 Jugadores Filtrados", f"{len(df_filtered):,}")
-with info_col2:
-    percentage = (len(df_filtered) / len(df)) * 100 if len(df) > 0 else 0
-    st.metric("📊 Porcentaje del Total", f"{percentage:.1f}%")
-with info_col3:
-    if team_col and team_col in df_filtered.columns:
-        unique_teams = df_filtered[team_col].nunique()
-        st.metric("🏟️ Equipos Representados", unique_teams)
-
-# Verificar si hay datos filtrados
-if df_filtered.empty:
-    st.markdown("""
-    <div class="empty-state">
-        <h3>⚠️ Sin Resultados</h3>
-        <p>No se encontraron jugadores con los filtros aplicados.</p>
-        <p style="font-size: 0.9rem; color: #6c757d; margin-top: 0.5rem;">
-            Intenta modificar o eliminar algunos filtros para obtener resultados.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-st.markdown("---")
-
 # Función auxiliar para obtener métricas disponibles con validación
 def get_available_metrics(df, category_metrics):
-    """Obtener métricas disponibles en el dataframe para una categoría"""
+    """Obtener métricas disponibles en el dataframe para una categoría (usando mapping normalizado)"""
     available = []
     numeric_cols = get_numeric_columns(df)
     
-    for metric in category_metrics:
-        if metric in df.columns and metric in numeric_cols:
-            # Verificar que tiene datos válidos
-            if df[metric].notna().sum() > 5:  # Al menos 5 valores válidos
-                available.append(metric)
-    
-    return available[:8]  # Máximo 8 para visualizaciones
+    for metric_bonito in category_metrics:
+        metric_col = mapping_wyscout.get(metric_bonito, metric_bonito)  # busca nombre real, si no existe usa el original
+        if metric_col in df.columns and metric_col in numeric_cols:
+            if df[metric_col].notna().sum() > 5:
+                available.append(metric_col)
+    return available[:8]
+
 
 # CONTENIDO PRINCIPAL SEGÚN TIPO DE ANÁLISIS
 if "Radar" in tipo_analisis:
@@ -542,124 +750,111 @@ if "Radar" in tipo_analisis:
             if len(available_metrics) >= 3:
                 # Permitir selección personalizada de métricas
                 st.markdown("#### 📊 Personalizar Métricas del Radar")
-                selected_metrics = st.multiselect(
+                # Generar diccionario: bonito → real
+                metrics_label_dict = {normalizar_nombre_metrica(metric): metric for metric in available_metrics}
+
+                selected_metrics_labels = st.multiselect(
                     "Selecciona las métricas para el radar:",
-                    available_metrics,
-                    default=available_metrics[:6],
+                    list(metrics_label_dict.keys()),
+                    default=list(metrics_label_dict.keys())[:6],
                     max_selections=8,
                     help="Máximo 8 métricas para el gráfico de radar"
                 )
+                # Obtener nombres reales para trabajar con los datos
+                selected_metrics = [metrics_label_dict[label] for label in selected_metrics_labels]
+
                 
                 if selected_metrics:
                     # Obtener datos del jugador
                     player_data = df_filtered[df_filtered[player_col] == selected_player].iloc[0]
                     
-                    col1, col2 = st.columns([2, 1])
+                    # Preparar datos para el radar profesional
+                    metrics_values = []
+                    metrics_labels_clean = []
+                    raw_values_dict = {}
+                    
+                    for metric in selected_metrics:
+                        if metric in player_data.index and pd.notna(player_data[metric]):
+                            # Calcular percentil
+                            metric_data = df_filtered[metric].dropna()
+                            if len(metric_data) > 1:
+                                percentile = (metric_data <= player_data[metric]).mean() * 100
+                            else:
+                                percentile = 50
+                            
+                            metrics_values.append(min(max(percentile, 0), 100))
+                            metrics_labels_clean.append(normalizar_nombre_metrica(metric))
+                            raw_values_dict[metric] = player_data[metric]
+                    
+                    # Información del jugador
+                    player_info = {
+                        'nombre': selected_player,
+                        'equipo': player_data[team_col] if team_col in player_data.index else 'N/A',
+                        'posicion': player_data[position_col] if position_col in player_data.index else 'N/A',
+                        'edad': f"{int(player_data[age_col])}" if age_col in player_data.index and pd.notna(player_data[age_col]) else 'N/A'
+                    }
+                    
+                    # Crear columnas para el layout
+                    col1, col2 = st.columns([3, 1])
                     
                     with col1:
-                        # Crear gráfico de radar mejorado
-                        categories = []
-                        values = []
+                        # Crear el radar profesional
+                        fig = create_individual_radar(
+                            player_data=player_data,
+                            metrics_values=metrics_values,
+                            metrics_labels=metrics_labels_clean,
+                            player_info=player_info,
+                            percentiles=True,
+                            color_scheme='#007bff'  # Color corporativo
+                        )
                         
-                        for metric in selected_metrics:
-                            if metric in player_data.index and pd.notna(player_data[metric]):
-                                # Normalizar valores (0-100) basado en percentiles
-                                metric_data = df_filtered[metric].dropna()
-                                if len(metric_data) > 1:
-                                    percentile = (metric_data <= player_data[metric]).mean() * 100
-                                else:
-                                    percentile = 50
-                                
-                                # Limpiar nombre de métrica para mostrar
-                                clean_name = metric.replace('_', ' ').replace('/', ' / ').replace(',_', '').title()
-                                categories.append(clean_name)
-                                values.append(min(max(percentile, 0), 100))
+                        # Mostrar el gráfico en Streamlit
+                        st.pyplot(fig, use_container_width=True)
+                        plt.close()  # Cerrar la figura para liberar memoria
                         
-                        if categories and values:
-                            # Crear gráfico de radar más visual
-                            fig = go.Figure()
-                            
-                            fig.add_trace(go.Scatterpolar(
-                                r=values,
-                                theta=categories,
-                                fill='toself',
-                                name=selected_player,
-                                line=dict(color='#007bff', width=4),
-                                fillcolor='rgba(0, 123, 255, 0.25)',
-                                marker=dict(color='#007bff', size=8)
-                            ))
-                            
-                            fig.update_layout(
-                                polar=dict(
-                                    radialaxis=dict(
-                                        visible=True,
-                                        range=[0, 100],
-                                        tickfont=dict(size=12, color='#666'),
-                                        tickvals=[25, 50, 75, 100],
-                                        ticktext=['25%', '50%', '75%', '100%'],
-                                        gridcolor='rgba(0,0,0,0.1)'
-                                    ),
-                                    angularaxis=dict(
-                                        tickfont=dict(size=12, color='#333'),
-                                        linecolor='rgba(0,0,0,0.2)'
-                                    ),
-                                    bgcolor='rgba(255,255,255,0.8)'
-                                ),
-                                showlegend=True,
-                                title=dict(
-                                    text=f"Perfil de Rendimiento: {selected_player}",
-                                    font=dict(size=18, color='#24282a'),
-                                    x=0.5
-                                ),
-                                height=650,
-                                font=dict(size=12),
-                                paper_bgcolor='white',
-                                plot_bgcolor='white'
-                            )
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Explicación del percentil
-                            st.caption("📊 **Valores en percentiles:** 100% = mejor del dataset, 0% = peor del dataset")
+                        # Explicación del percentil
+                        st.caption("📊 **Valores en percentiles:** 100% = mejor del dataset, 0% = peor del dataset")
                     
                     with col2:
                         st.markdown("#### 📋 Información del Jugador")
                         
-                        # Información básica
-                        basic_info = {}
-                        if team_col and team_col in player_data.index:
-                            basic_info[f"🏟️ Equipo"] = player_data[team_col]
-                        if position_col and position_col in player_data.index:
-                            basic_info[f"⚽ Posición"] = player_data[position_col]
-                        if age_col and age_col in player_data.index:
-                            basic_info[f"📊 Edad"] = f"{player_data[age_col]} años"
+                        # Información básica con mejor formato
+                        info_container = st.container()
+                        with info_container:
+                            st.markdown(f"""
+                            <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 4px solid #007bff;'>
+                                <p style='margin: 5px 0;'><strong>🏟️ Equipo:</strong> {player_info['equipo']}</p>
+                                <p style='margin: 5px 0;'><strong>⚽ Posición:</strong> {player_info['posicion']}</p>
+                                <p style='margin: 5px 0;'><strong>📊 Edad:</strong> {player_info['edad']} años</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                         
-                        for label, value in basic_info.items():
-                            st.write(f"**{label}:** {value}")
+                        st.markdown("#### 📈 Valores Detallados")
                         
-                        st.markdown("#### 📈 Valores Reales")
-                        
-                        # Mostrar valores reales de las métricas seleccionadas
-                        for metric in selected_metrics[:6]:
-                            if metric in player_data.index and pd.notna(player_data[metric]):
-                                raw_value = player_data[metric]
-                                # Calcular percentil para mostrar
+                        # Crear un DataFrame para mostrar los valores
+                        values_data = []
+                        for metric, clean_label in zip(selected_metrics[:6], metrics_labels_clean[:6]):
+                            if metric in raw_values_dict:
+                                raw_value = raw_values_dict[metric]
                                 metric_data = df_filtered[metric].dropna()
                                 percentile = (metric_data <= raw_value).mean() * 100 if len(metric_data) > 1 else 50
                                 
-                                formatted_value = format_value(raw_value)
-                                clean_metric_name = metric.replace('_', ' ').replace('/', ' / ').replace(',_', '').title()
-                                st.write(f"**{clean_metric_name}:** {formatted_value} ({percentile:.0f}%)")
+                                values_data.append({
+                                    'Métrica': clean_label,
+                                    'Valor': format_value(raw_value),
+                                    'Percentil': f"{percentile:.0f}%"
+                                })
+                        
+                        if values_data:
+                            values_df = pd.DataFrame(values_data)
+                            st.dataframe(values_df, hide_index=True, use_container_width=True)
+                        
                 else:
                     st.warning("⚠️ Selecciona al menos 3 métricas para crear el radar")
             else:
                 st.warning(f"⚠️ No hay suficientes métricas numéricas disponibles para {selected_category}")
-                if available_metrics:
-                    st.info(f"Métricas disponibles: {', '.join(available_metrics)}")
         else:
             st.warning("⚠️ No hay jugadores disponibles con los filtros aplicados")
-    else:
-        st.error("❌ No se detectó columna de jugadores")
 
 elif "Comparación" in tipo_analisis:
     st.markdown("### 📊 Comparación Múltiple Avanzada")
@@ -683,13 +878,15 @@ elif "Comparación" in tipo_analisis:
             available_metrics = get_available_metrics(df_filtered, category_metrics)
             
             if available_metrics:
-                selected_stats = st.multiselect(
+                stats_label_dict = build_metrics_label_dict(available_metrics)
+                selected_stats_labels = st.multiselect(
                     "📊 Métricas a Comparar:",
-                    available_metrics,
-                    default=available_metrics[:5],
+                    list(stats_label_dict.keys()),
+                    default=list(stats_label_dict.keys())[:5],
                     help="Selecciona las métricas para comparar"
                 )
-                
+                selected_stats = [stats_label_dict[l] for l in selected_stats_labels]
+
                 if selected_stats:
                     # Tipo de comparación
                     comparison_type = st.radio(
@@ -700,50 +897,79 @@ elif "Comparación" in tipo_analisis:
                     )
                     
                     if comparison_type == "Radar Múltiple":
-                        # Radar con múltiples jugadores
-                        fig = go.Figure()
+                        # Preparar datos para el radar comparativo
+                        players_data = {}
+                        metrics_labels_clean = [normalizar_nombre_metrica(stat) for stat in selected_stats]
                         
-                        colors = ['#007bff', '#28a745', '#ffc107', '#dc3545', '#6f42c1']
-                        
-                        for i, player in enumerate(selected_players):
+                        for player in selected_players:
                             player_data = df_filtered[df_filtered[player_col] == player].iloc[0]
+                            player_values = {}
                             
-                            categories = []
-                            values = []
-                            
-                            for metric in selected_stats:
+                            for metric, clean_label in zip(selected_stats, metrics_labels_clean):
                                 if metric in player_data.index and pd.notna(player_data[metric]):
                                     metric_data = df_filtered[metric].dropna()
                                     percentile = (metric_data <= player_data[metric]).mean() * 100
-                                    
-                                    clean_name = metric.replace('_', ' ').replace('/', ' / ').replace(',_', '').title()
-                                    categories.append(clean_name)
-                                    values.append(min(max(percentile, 0), 100))
+                                    player_values[clean_label] = min(max(percentile, 0), 100)
+                                else:
+                                    player_values[clean_label] = 0
                             
-                            if categories and values:
-                                fig.add_trace(go.Scatterpolar(
-                                    r=values,
-                                    theta=categories,
-                                    fill='toself',
-                                    name=player,
-                                    line=dict(color=colors[i % len(colors)], width=3),
-                                    fillcolor=f'rgba({int(colors[i % len(colors)][1:3], 16)}, {int(colors[i % len(colors)][3:5], 16)}, {int(colors[i % len(colors)][5:7], 16)}, 0.15)'
-                                ))
+                            players_data[player] = player_values
                         
-                        fig.update_layout(
-                            polar=dict(
-                                radialaxis=dict(
-                                    visible=True,
-                                    range=[0, 100],
-                                    tickvals=[25, 50, 75, 100],
-                                    ticktext=['25%', '50%', '75%', '100%']
-                                )
-                            ),
-                            title=f"Comparación Radar: {selected_category}",
-                            height=600
+                        # Crear el radar comparativo profesional
+                        fig = create_comparison_radar(
+                            players_data=players_data,
+                            metrics_labels=metrics_labels_clean,
+                            max_players=5,
+                            colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8']
                         )
                         
-                        st.plotly_chart(fig, use_container_width=True)
+                        # Mostrar el gráfico
+                        st.pyplot(fig, use_container_width=True)
+                        plt.close()
+                        
+                        # Tabla de comparación detallada
+                        st.markdown("#### 📋 Tabla de Comparación Detallada")
+                        
+                        # Crear DataFrame para la tabla
+                        comparison_data = []
+                        for player in selected_players:
+                            player_data = df_filtered[df_filtered[player_col] == player].iloc[0]
+                            row_data = {'Jugador': player}
+                            
+                            for metric, clean_label in zip(selected_stats, metrics_labels_clean):
+                                if metric in player_data.index and pd.notna(player_data[metric]):
+                                    value = player_data[metric]
+                                    metric_data = df_filtered[metric].dropna()
+                                    percentile = (metric_data <= value).mean() * 100
+                                    row_data[clean_label] = f"{format_value(value)} ({percentile:.0f}%)"
+                                else:
+                                    row_data[clean_label] = "N/A"
+                            
+                            comparison_data.append(row_data)
+                        
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+                        
+                        # Análisis de fortalezas y debilidades
+                        st.markdown("#### 💡 Análisis de Fortalezas y Debilidades")
+                        
+                        cols = st.columns(len(selected_players[:3]))  # Máximo 3 columnas
+                        for idx, (player, player_values) in enumerate(list(players_data.items())[:3]):
+                            with cols[idx]:
+                                st.markdown(f"**{player}**")
+                                
+                                # Encontrar fortalezas (top 3 métricas)
+                                sorted_metrics = sorted(player_values.items(), key=lambda x: x[1], reverse=True)
+                                
+                                st.markdown("🟢 **Fortalezas:**")
+                                for metric, value in sorted_metrics[:3]:
+                                    if value > 70:  # Solo mostrar si es realmente una fortaleza
+                                        st.write(f"• {metric}: {value:.0f}%")
+                                
+                                st.markdown("🔴 **A mejorar:**")
+                                for metric, value in sorted_metrics[-3:]:
+                                    if value < 50:  # Solo mostrar si es realmente un área de mejora
+                                        st.write(f"• {metric}: {value:.0f}%")
                         
                     else:
                         # Gráfico de barras
@@ -760,7 +986,7 @@ elif "Comparación" in tipo_analisis:
                                         metric_data = df_filtered[stat].dropna()
                                         value = (metric_data <= value).mean() * 100
                                     
-                                    clean_stat_name = stat.replace('_', ' ').replace('/', ' / ').replace(',_', '').title()
+                                    clean_stat_name = normalizar_nombre_metrica(stat)
                                     comparison_data.append({
                                         'Jugador': player,
                                         'Métrica': clean_stat_name,
@@ -813,6 +1039,17 @@ elif "Dispersión" in tipo_analisis:
     # Obtener todas las métricas numéricas disponibles
     all_numeric_cols = get_numeric_columns(df_filtered)
     relevant_metrics = [col for col in all_numeric_cols if not col.lower().endswith('_id')]
+
+    # INVERTIMOS EL MAPPING: real → bonito
+    inverse_mapping = {v: k for k, v in mapping_wyscout.items()}
+    # Creamos dict solo con las métricas que existen en el DataFrame
+    metric_display_dict = {
+        inverse_mapping.get(col, normalizar_nombre_metrica(col)): col
+        for col in relevant_metrics
+    }
+
+    # Ordenamos por nombre bonito
+    metric_display_items = sorted(metric_display_dict.items())
     
     if len(relevant_metrics) >= 2:
         # Interfaz de selección para scouts
@@ -820,11 +1057,13 @@ elif "Dispersión" in tipo_analisis:
         
         with col1:
             st.markdown("#### 📈 Métrica Principal (Eje X)")
-            x_metric = st.selectbox(
-                "Selecciona métrica X:",
-                relevant_metrics,
-                help="Métrica que se mostrará en el eje horizontal"
+            x_metric_bonito = st.selectbox(
+            "Selecciona métrica X:",
+            [item[0] for item in metric_display_items],
+            help="Métrica que se mostrará en el eje horizontal"
             )
+            # Obtenemos el nombre real para trabajar internamente
+            x_metric = metric_display_dict[x_metric_bonito]
             
             # Filtros específicos para X
             if x_metric:
@@ -832,7 +1071,7 @@ elif "Dispersión" in tipo_analisis:
                 if len(x_data) > 0:
                     x_min, x_max = float(x_data.min()), float(x_data.max())
                     x_range = st.slider(
-                        f"Rango de {x_metric.replace('_', ' ').title()}:",
+                        f"Rango de {x_metric_bonito}:",
                         min_value=x_min,
                         max_value=x_max,
                         value=(x_min, x_max),
@@ -841,12 +1080,13 @@ elif "Dispersión" in tipo_analisis:
         
         with col2:
             st.markdown("#### 📊 Métrica Secundaria (Eje Y)")
-            y_options = [col for col in relevant_metrics if col != x_metric]
-            y_metric = st.selectbox(
+            y_metric_display_items = [item for item in metric_display_items if item[0] != x_metric_bonito]
+            y_metric_bonito = st.selectbox(
                 "Selecciona métrica Y:",
-                y_options,
+                [item[0] for item in y_metric_display_items],
                 help="Métrica que se mostrará en el eje vertical"
             )
+            y_metric = metric_display_dict[y_metric_bonito]
             
             # Filtros específicos para Y
             if y_metric:
@@ -854,7 +1094,7 @@ elif "Dispersión" in tipo_analisis:
                 if len(y_data) > 0:
                     y_min, y_max = float(y_data.min()), float(y_data.max())
                     y_range = st.slider(
-                        f"Rango de {y_metric.replace('_', ' ').title()}:",
+                        f"Rango de {y_metric_bonito}:",
                         min_value=y_min,
                         max_value=y_max,
                         value=(y_min, y_max),
@@ -909,12 +1149,12 @@ elif "Dispersión" in tipo_analisis:
                     x=x_metric,
                     y=y_metric,
                     size=size_by,
-                    title=f"Análisis Scout: {x_metric.replace('_', ' ').title()} vs {y_metric.replace('_', ' ').title()}",
+                    title=f"Análisis Scout: {normalizar_nombre_metrica(x_metric)} vs {normalizar_nombre_metrica(y_metric)}",
                     trendline="ols" if show_trendline else None,
                     hover_data=[player_col, team_col, position_col] if all([player_col, team_col, position_col]) else None,
                     labels={
-                        x_metric: x_metric.replace('_', ' ').title(),
-                        y_metric: y_metric.replace('_', ' ').title()
+                        x_metric: normalizar_nombre_metrica(x_metric),
+                        y_metric: normalizar_nombre_metrica(y_metric)
                     },
                     color_discrete_sequence=['#007bff']  # Color corporativo uniforme
                 )
@@ -975,7 +1215,7 @@ elif "Dispersión" in tipo_analisis:
                         line_dash="dash",
                         line_color="rgba(239, 68, 68, 0.7)",  # Rojo semitransparente
                         line_width=2,
-                        annotation_text=f"Promedio {x_metric.replace('_', ' ').title()}: {format_value(x_mean)}",
+                        annotation_text=f"Promedio {normalizar_nombre_metrica(x_metric)}: {format_value(x_mean)}",
                         annotation_position="top",
                         annotation=dict(
                             bgcolor="rgba(255, 255, 255, 0.8)",
@@ -990,7 +1230,7 @@ elif "Dispersión" in tipo_analisis:
                         line_dash="dash",
                         line_color="rgba(34, 197, 94, 0.7)",  # Verde semitransparente
                         line_width=2,
-                        annotation_text=f"Promedio {y_metric.replace('_', ' ').title()}: {format_value(y_mean)}",
+                        annotation_text=f"Promedio {normalizar_nombre_metrica(x_metric)}: {format_value(x_mean)}",
                         annotation_position="right",
                         annotation=dict(
                             bgcolor="rgba(255, 255, 255, 0.8)",
@@ -1056,7 +1296,7 @@ elif "Dispersión" in tipo_analisis:
                 with col2:
                     if size_by:
                         size_range = filtered_scatter_df[size_by].agg(['min', 'max'])
-                        st.metric(f"📏 Rango {size_by.replace('_', ' ').title()}", f"{format_value(size_range['min'])} - {format_value(size_range['max'])}")
+                        st.metric(f"📏 Rango {normalizar_nombre_metrica(size_by)}", f"{format_value(size_range['min'])} - {format_value(size_range['max'])}")
                     else:
                         st.metric("📊 Correlación", f"{correlation_coef:.3f}")
                 
@@ -1117,7 +1357,7 @@ elif "Dispersión" in tipo_analisis:
                         
                         st.markdown("**🟡 Especialistas en Y (Bajo-Alto):**")
                         if len(cuadrante_2) > 0:
-                            st.info(f"ℹ️ {len(cuadrante_2)} jugadores destacan más en {y_metric.replace('_', ' ').title()}")
+                            st.info(f"ℹ️ {len(cuadrante_2)} jugadores destacan más en {normalizar_nombre_metrica(y_metric)}")
                             spec_y_players = cuadrante_2.nlargest(2, y_metric)[player_col].tolist() if player_col else []
                             for player in spec_y_players[:2]:
                                 st.write(f"📊 {player}")
@@ -1127,7 +1367,7 @@ elif "Dispersión" in tipo_analisis:
                     with quad_col2:
                         st.markdown("**🟠 Especialistas en X (Alto-Bajo):**")
                         if len(cuadrante_4) > 0:
-                            st.info(f"ℹ️ {len(cuadrante_4)} jugadores destacan más en {x_metric.replace('_', ' ').title()}")
+                            st.info(f"ℹ️ {len(cuadrante_4)} jugadores destacan más en {normalizar_nombre_metrica(x_metric)}")
                             spec_x_players = cuadrante_4.nlargest(2, x_metric)[player_col].tolist() if player_col else []
                             for player in spec_x_players[:2]:
                                 st.write(f"📈 {player}")
@@ -1195,12 +1435,21 @@ elif "Equipo" in tipo_analisis:
         relevant_metrics = [col for col in numeric_cols if any(keyword in col.lower() 
                           for keyword in ['gol', 'asist', 'pase', 'duel', 'xg', 'min'])]
         
-        if relevant_metrics:
-            selected_metric = st.selectbox(
+        # Invertimos mapping real->bonito
+        inverse_mapping = {v: k for k, v in mapping_wyscout.items()}
+        metric_display_dict = {
+            inverse_mapping.get(col, normalizar_nombre_metrica(col)): col
+            for col in relevant_metrics
+        }
+        metric_display_items = sorted(metric_display_dict.items())
+
+        if metric_display_items:
+            selected_metric_bonito = st.selectbox(
                 "📊 Métrica Principal:",
-                relevant_metrics,
+                [item[0] for item in metric_display_items],
                 help="Selecciona la métrica para análisis por equipos"
             )
+            selected_metric = metric_display_dict[selected_metric_bonito]
             
             metric_type = st.radio(
                 "📈 Tipo de Agregación:",
@@ -1224,7 +1473,7 @@ elif "Equipo" in tipo_analisis:
                     x=team_stats.values,
                     y=team_stats.index,
                     orientation='h',
-                    title=f"{metric_type} de {selected_metric.replace('_', ' ').title()} por Equipo",
+                    title=f"{metric_type} de {normalizar_nombre_metrica(selected_metric)} por Equipo",
                     color=team_stats.values,
                     color_continuous_scale='viridis'
                 )
@@ -1267,7 +1516,7 @@ elif "Correlaciones" in tipo_analisis or "Mapa" in tipo_analisis:
             # Crear nombres limpios para el mapa
             clean_names = []
             for metric in available_metrics:
-                clean_name = metric.replace('_', ' ').replace('/', ' / ').replace(',_', '').title()
+                clean_name = normalizar_nombre_metrica(metric)
                 # Limitar longitud del nombre
                 if len(clean_name) > 20:
                     clean_name = clean_name[:17] + "..."
@@ -1399,8 +1648,15 @@ else:  # Explorador de Jugadores
         display_cols = important_cols + relevant_numeric
         
         if display_cols:
-            st.dataframe(df_filtered[display_cols].head(20), use_container_width=True)
-    
+            # Prepara el DataFrame para mostrar solo las primeras 20 filas y columnas seleccionadas
+            sample_df = df_filtered[display_cols].head(20).copy()
+
+            # Renombra las columnas a nombres bonitos usando tu función de normalización
+            rename_dict = {col: normalizar_nombre_metrica(col) for col in display_cols}
+            sample_df = sample_df.rename(columns=rename_dict)
+
+            st.dataframe(sample_df, use_container_width=True)
+            
     with tab2:
         st.markdown("#### 🔍 Búsqueda Detallada de Jugadores")
         
@@ -1408,13 +1664,19 @@ else:  # Explorador de Jugadores
         search_col1, search_col2 = st.columns(2)
         
         with search_col1:
+            # Paso 1: Crear mapping bonito → real para columnas de texto
             text_columns = [col for col in df_filtered.columns if df_filtered[col].dtype == 'object']
-            search_columns = st.multiselect(
-                "📋 Columnas donde buscar:",
-                text_columns,
-                default=[player_col] if player_col in text_columns else [],
-                help="Selecciona columnas para la búsqueda"
-            )
+            text_label_dict = {normalizar_nombre_metrica(col): col for col in text_columns}
+            # Paso 2: Multiselect con nombres bonitos
+            search_columns_bonitos = st.multiselect(
+            "📋 Columnas donde buscar:",
+            list(text_label_dict.keys()),
+            default=[normalizar_nombre_metrica(player_col)] if player_col in text_columns else [],
+            help="Selecciona columnas para la búsqueda"
+        )
+
+        # Paso 3: Obtener los nombres reales para operar
+        search_columns = [text_label_dict[bonito] for bonito in search_columns_bonitos]
         
         with search_col2:
             search_term = st.text_input(
@@ -1434,7 +1696,10 @@ else:  # Explorador de Jugadores
             
             if not search_results.empty:
                 st.success(f"✅ {len(search_results)} resultados encontrados")
-                st.dataframe(search_results, use_container_width=True, height=400)
+                rename_dict = {col: normalizar_nombre_metrica(col) for col in search_results.columns}
+                display_results = search_results.rename(columns=rename_dict)
+                
+                st.dataframe(display_results, use_container_width=True, height=400)
             else:
                 st.warning(f"⚠️ No se encontraron resultados para '{search_term}'")
     
@@ -1443,13 +1708,15 @@ else:  # Explorador de Jugadores
         
         # Selector de métrica para ranking
         numeric_cols = get_numeric_columns(df_filtered)
+        metric_label_dict = build_metrics_label_dict(numeric_cols)
         
         if numeric_cols:
-            ranking_metric = st.selectbox(
+            ranking_metric_label = st.selectbox(
                 "📊 Métrica para Ranking:",
-                numeric_cols,
+                list(metric_label_dict.keys()),
                 help="Selecciona métrica para crear ranking"
             )
+            ranking_metric = metric_label_dict[ranking_metric_label]
             
             ranking_order = st.radio(
                 "📈 Orden:",
@@ -1465,7 +1732,7 @@ else:  # Explorador de Jugadores
                 
                 if not ranking_df.empty:
                     # Mostrar top 10 como métricas
-                    st.markdown(f"#### 🏆 Top 10 - {ranking_metric.replace('_', ' ').title()}")
+                    st.markdown(f"#### 🏆 Top 10 - {normalizar_nombre_metrica(ranking_metric)}")
                     
                     top_10 = ranking_df.head(10)
                     
@@ -1489,6 +1756,10 @@ else:  # Explorador de Jugadores
                         
                         # Formatear la columna de métrica
                         ranking_display[ranking_metric] = ranking_display[ranking_metric].apply(format_value)
+                        
+                        # Renombrar columnas: nombre bonito para usuario
+                        rename_dict = {col: normalizar_nombre_metrica(col) for col in display_cols}
+                        ranking_display = ranking_display.rename(columns=rename_dict)
                         
                         st.dataframe(ranking_display, use_container_width=True)
             except Exception as e:

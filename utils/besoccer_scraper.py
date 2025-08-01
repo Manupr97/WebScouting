@@ -378,7 +378,7 @@ class BeSoccerScraper:
         for wrapper in player_wrappers:
             jugador = self._extraer_jugador_rapido(wrapper, es_titular=True)
             if jugador:
-                equipo = self._determinar_equipo(wrapper)
+                equipo = jugador.get('equipo', 'desconocido')
                 if equipo == 'local':
                     alineacion_local.append(jugador)
                 elif equipo == 'visitante':
@@ -431,8 +431,22 @@ class BeSoccerScraper:
             nombre = ""
             posicion = "N/A"
             imagen_url = ""
+            url_besoccer = ""
+            equipo = self._determinar_equipo(wrapper)
             
-            # JSON-LD primero
+            # Primero intentar encontrar el enlace del jugador
+            link_jugador = wrapper.find('a', attrs={'data-cy': 'fieldPlayer'})
+            if not link_jugador:
+                link_jugador = wrapper.find('a')  # Fallback a cualquier enlace
+            
+            # Extraer URL del href si existe
+            if link_jugador and link_jugador.get('href'):
+                href = link_jugador.get('href')
+                if '/jugador/' in href:
+                    url_besoccer = f"https://es.besoccer.com{href}" if href.startswith('/') else href
+                    print(f"✅ URL extraída del href: {url_besoccer}")
+            
+            # JSON-LD para otros datos
             json_script = wrapper.find('script', type='application/ld+json')
             if json_script:
                 try:
@@ -441,19 +455,20 @@ class BeSoccerScraper:
                         nombre = self._limpiar_texto(data.get('name', ''))
                         posicion = self._mapear_posicion(data.get('jobtitle', 'N/A'))
                         imagen_url = data.get('image', '')
-                except:
-                    pass
+                        # Si encontramos URL en JSON-LD, úsala (tiene prioridad)
+                        if data.get('url'):
+                            url_besoccer = data.get('url')
+                            print(f"✅ URL del JSON-LD: {url_besoccer}")
+                except Exception as e:
+                    print(f"❌ Error parseando JSON-LD: {e}")
             
-            # Si no hay nombre, buscar en el link
-            if not nombre:
-                link = wrapper.find('a')
-                if link:
-                    # Buscar en div.name.name-lineups
-                    name_div = link.find('div', class_='name name-lineups')
-                    if name_div:
-                        nombre = self._limpiar_texto(name_div.get_text())
-                    else:
-                        nombre = self._limpiar_texto(link.get_text())
+            # Si no hay nombre del JSON-LD, buscar en el link
+            if not nombre and link_jugador:
+                name_div = link_jugador.find('div', class_='name name-lineups')
+                if name_div:
+                    nombre = self._limpiar_texto(name_div.get_text())
+                else:
+                    nombre = self._limpiar_texto(link_jugador.get_text())
             
             if not nombre:
                 return None
@@ -467,7 +482,9 @@ class BeSoccerScraper:
                 'numero': self._extraer_numero(wrapper),
                 'posicion': posicion,
                 'es_titular': es_titular,
-                'imagen_url': imagen_url
+                'imagen_url': imagen_url,
+                'url_besoccer': url_besoccer,
+                'equipo': equipo
             }
         except Exception as e:
             print(f"Error extrayendo jugador: {e}")
@@ -483,6 +500,13 @@ class BeSoccerScraper:
             nombre = ""
             posicion = "N/A"
             imagen_url = ""
+            url_besoccer = ""
+            
+            # Extraer URL del href del enlace
+            href = link.get('href', '')
+            if href and '/jugador/' in href:
+                url_besoccer = f"https://es.besoccer.com{href}" if href.startswith('/') else href
+                print(f"✅ URL de suplente extraída del href: {url_besoccer}")
             
             # JSON-LD
             json_script = link.find('script', type='application/ld+json')
@@ -491,11 +515,13 @@ class BeSoccerScraper:
                     data = json.loads(json_script.get_text())
                     if data.get('@type') == 'Person':
                         nombre = self._limpiar_texto(data.get('name', ''))
-                        # En suplentes el jobtitle puede venir vacío
                         jobtitle = data.get('jobtitle', '')
                         if jobtitle:
                             posicion = self._mapear_posicion(jobtitle)
                         imagen_url = data.get('image', '')
+                        # Si hay URL en JSON-LD, tiene prioridad
+                        if data.get('url'):
+                            url_besoccer = data.get('url')
                 except:
                     pass
             
@@ -518,6 +544,7 @@ class BeSoccerScraper:
                 'posicion': posicion,
                 'es_titular': False,
                 'imagen_url': imagen_url,
+                'url_besoccer': url_besoccer,
                 'equipo': equipo
             }
         except Exception as e:
@@ -676,6 +703,180 @@ class BeSoccerScraper:
         self.cache_urls_partidos = {}
         print("🗑️ Cache limpiado")
 
+    def obtener_datos_perfil_jugador(self, url_perfil):
+        """
+        Obtiene datos adicionales del perfil de un jugador en BeSoccer
+        
+        Args:
+            url_perfil: URL del perfil del jugador (ej: https://es.besoccer.com/jugador/s-miettinen-3161334)
+        
+        Returns:
+            dict con los datos del jugador o None si hay error
+        """
+        try:
+            print(f"🔍 Obteniendo datos del perfil: {url_perfil}")
+            
+            # Verificar cache
+            cache_key = f"perfil_{url_perfil}"
+            if self._verificar_cache(cache_key):
+                print(f"✅ Usando perfil del cache")
+                return self.cache[cache_key]['data']
+            
+            response = self.session.get(url_perfil, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            datos_jugador = {
+                'nombre_completo': None,
+                'edad': None,
+                'altura': None,
+                'peso': None,
+                'nacionalidad': None,
+                'valor_mercado': None,
+                'elo': None,
+                'dorsal': None,
+                'posicion_principal': None,
+                'posicion_secundaria': None,
+                'equipo_actual': None,
+                'escudo_equipo': None,
+                'liga_actual': None,
+                'pais_nacimiento': None,
+                'pie_preferido': None,
+                'fuente': 'BeSoccer'
+            }
+            
+            # Buscar en el panel principal con clase "panel"
+            panel_principal = soup.find('div', class_='panel')
+            if panel_principal:
+                panel_head = panel_principal.find('div', class_='panel-head')
+                if panel_head:
+                    # Nombre mostrado (apodo)
+                    panel_title = panel_head.find('h2', class_='panel-title')
+                    if panel_title:
+                        datos_jugador['nombre_mostrado'] = panel_title.get_text(strip=True)
+                        print(f"   - nombre_mostrado: {datos_jugador['nombre_mostrado']}")
+                    
+                    # Nombre completo real
+                    panel_subtitle = panel_head.find('div', class_='panel-subtitle')
+                    if panel_subtitle:
+                        nombre_completo = panel_subtitle.get_text(strip=True)
+                        if nombre_completo:
+                            datos_jugador['nombre_completo'] = nombre_completo
+                            print(f"   - nombre_completo: {datos_jugador['nombre_completo']}")
+
+            # 1. Buscar panel con estadísticas (edad, altura, peso, valor, ELO)
+            stat_list = soup.find('div', class_='panel-body stat-list jc-sa ph5')
+            if stat_list:
+                stats = stat_list.find_all('div', class_='stat')
+                
+                for stat in stats:
+                    big_row = stat.find('div', class_='big-row')
+                    small_rows = stat.find_all('div', class_='small-row')
+                    
+                    if big_row and small_rows:
+                        valor = big_row.get_text().strip()
+                        for small_row in small_rows:
+                            texto = small_row.get_text().strip().lower()
+                            
+                            if 'años' in texto:
+                                datos_jugador['edad'] = int(valor) if valor.isdigit() else valor
+                            elif 'kgs' in texto:
+                                datos_jugador['peso'] = int(valor) if valor.isdigit() else valor
+                            elif 'cms' in texto:
+                                datos_jugador['altura'] = int(valor) if valor.isdigit() else valor
+                            elif 'm.€' in texto or 'k€' in texto:
+                                datos_jugador['valor_mercado'] = valor + (' M€' if 'm.€' in texto else ' K€')
+                            elif 'elo' in texto:
+                                round_row = stat.find('div', class_='round-row')
+                                if round_row:
+                                    span = round_row.find('span')
+                                    if span and span.get_text().strip().isdigit():
+                                        datos_jugador['elo'] = int(span.get_text().strip())
+
+                    # Nacionalidad (bandera principal)
+                    img_flag = stat.find('img', attrs={'alt': True})
+                    if img_flag and not datos_jugador['nacionalidad']:
+                        datos_jugador['nacionalidad'] = img_flag.get('alt', '')
+                    
+                    # Dorsal
+                    dorsal_div = stat.find('div', class_='round-row mb5 black')
+                    if dorsal_div:
+                        span = dorsal_div.find('span')
+                        if span and span.get_text().strip().isdigit():
+                            datos_jugador['dorsal'] = int(span.get_text().strip())
+            
+            # 2. Buscar posiciones específicas del jugador
+            panel_positions = soup.find('div', class_='panel role-positions')
+            if panel_positions:
+                role_box = panel_positions.find('div', class_='role-box')
+                if role_box:
+                    # Posición principal
+                    main_role = role_box.find('div', class_='main-role')
+                    if main_role:
+                        spans = main_role.find_all('span')
+                        if len(spans) >= 2:
+                            datos_jugador['posicion_principal'] = spans[0].get_text().strip()
+                    # Posiciones secundarias (tomar la primera si existe)
+                    position_list = role_box.find('ul', class_='position-list')
+                    if position_list:
+                        first_li = position_list.find('li')
+                        if first_li:
+                            spans = first_li.find_all('span')
+                            if len(spans) >= 1:
+                                datos_jugador['posicion_secundaria'] = spans[0].get_text().strip()
+            
+            # 3. Buscar datos de carrera (equipo actual, liga)
+            carrera_head = soup.find('div', class_='table-head', string=lambda s: s and "Datos de su Carrera" in s)
+            if carrera_head:
+                carrera_body = carrera_head.find_next('div', class_='table-body')
+                if carrera_body:
+                    # Equipo actual
+                    equipo_row = carrera_body.find('a', attrs={'data-cy': 'currentTeam'})
+                    if equipo_row:
+                        datos_jugador['equipo_actual'] = equipo_row.get_text(strip=True)
+                        img_tag = equipo_row.find('img')
+                        if img_tag:
+                            datos_jugador['escudo_equipo'] = img_tag.get('src', '')
+
+                    # Competición actual
+                    liga_row = carrera_body.find('a', attrs={'data-cy': 'currentCompetition'})
+                    if liga_row:
+                        datos_jugador['liga_actual'] = liga_row.get_text(strip=True)
+
+            # 4. Datos personales (país nacimiento, pie preferido)
+            personal_head = soup.find('div', class_='table-head', string=lambda s: s and "Datos personales" in s)
+            if personal_head:
+                personal_body = personal_head.find_next('div', class_='table-body')
+                if personal_body:
+                    # País nacimiento
+                    nacimiento_row = personal_body.find('a', attrs={'data-cy': 'birthplace'})
+                    if nacimiento_row:
+                        datos_jugador['pais_nacimiento'] = nacimiento_row.get_text(strip=True)
+                    
+                    # Pie preferido
+                    pie_row = personal_body.find('div', string=lambda s: s and "Pie preferido" in s)
+                    if pie_row and pie_row.find_next('div'):
+                        datos_jugador['pie_preferido'] = pie_row.find_next('div').get_text(strip=True)
+
+            # Guardar en cache
+            self._guardar_cache(cache_key, datos_jugador)
+            
+            print("✅ Datos obtenidos de BeSoccer:")
+            for key, value in datos_jugador.items():
+                if value:
+                    print(f"   - {key}: {value}")
+            
+            return datos_jugador
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error de conexión con BeSoccer: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Error obteniendo datos del perfil: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 # ==========================================
 # CLASE AUXILIAR PARA LIVESCORE - SIMPLIFICADA
@@ -870,54 +1071,3 @@ def obtener_alineaciones_besoccer(besoccer_id, equipo_local="", equipo_visitante
         }
 
 
-# ==========================================
-# TESTING
-# ==========================================
-
-if __name__ == "__main__":
-    print("🧪 Testing BeSoccer Scraper - VERSIÓN ORIGINAL CORREGIDA...")
-    
-    # Test 1: Obtener partidos (sin duplicación)
-    print("\n1️⃣ Obteniendo partidos de hoy...")
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
-    partidos = obtener_partidos_besoccer(fecha_hoy)
-    print(f"   ✅ {len(partidos)} partidos encontrados")
-    
-    if partidos:
-        primer_partido = partidos[0]
-        print(f"   📋 Primer partido: {primer_partido['equipo_local']} vs {primer_partido['equipo_visitante']}")
-        print(f"   🔗 URL completa: {primer_partido.get('url_completa', 'No guardada')}")
-    
-    # Test 2: Obtener alineaciones con URL correcta
-    print("\n2️⃣ Testing alineaciones...")
-    if partidos and len(partidos) > 0:
-        partido_test = partidos[0]
-        resultado = obtener_alineaciones_besoccer(
-            partido_test['besoccer_id'],
-            partido_test['equipo_local'],
-            partido_test['equipo_visitante'],
-            partido_test['fecha']
-        )
-        
-        if resultado['encontrado']:
-            print(f"   ✅ Alineaciones encontradas")
-            print(f"   ✅ Local: {len(resultado['alineacion_local'])} jugadores")
-            print(f"   ✅ Visitante: {len(resultado['alineacion_visitante'])} jugadores")
-            
-            # Verificar números y posiciones
-            if resultado['alineacion_local']:
-                jugador = resultado['alineacion_local'][0]
-                print(f"\n   📋 Ejemplo jugador local:")
-                print(f"      Nombre: {jugador.get('nombre')}")
-                print(f"      Número: {jugador.get('numero')}")
-                print(f"      Posición: {jugador.get('posicion')}")
-        else:
-            print(f"   ❌ No encontrado: {resultado.get('mensaje', 'Sin mensaje')}")
-    
-    print("\n🎉 Testing completado!")
-    print("\n📋 CAMBIOS APLICADOS:")
-    print("   ✅ Mantenido el código original que funcionaba bien")
-    print("   ✅ Añadido método _extraer_match_id_de_url")
-    print("   ✅ Añadido guardado de URL completa en cache")
-    print("   ✅ Añadido parámetro fecha_partido opcional")
-    print("   ✅ Sin cambios en extracción de números y posiciones")

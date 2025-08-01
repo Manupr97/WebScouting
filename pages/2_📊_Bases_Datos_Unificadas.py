@@ -4,7 +4,7 @@ import sys
 import os
 import json
 from datetime import datetime
-
+import sqlite3
 
 # Añadir el directorio raíz al path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +15,24 @@ sys.path.append(parent_dir)
 from common.login import LoginManager
 from models.wyscout_model import WyscoutModel
 from models.jugador_model import JugadorModel
+from utils.normalizacion import normalizar_nombre_metrica
+from utils.normalizacion import generar_o_cargar_mapping_wyscout
+from utils.aspectos import obtener_aspectos_evaluacion_completa 
+from utils.pdf_generator import PDFGenerator
+try:
+    from utils.pdf_generator import PDFGenerator
+    PDF_DISPONIBLE = True
+except ImportError:
+    print("⚠️ Generador de PDF no disponible")
+    PDF_DISPONIBLE = False
+    PDFGenerator = None
+
+excel_path = os.path.join(parent_dir, "data", "wyscout_LaLiga_limpio.xlsx")
+json_path = os.path.join(parent_dir, "utils", "mapping_wyscout.json")
+
+mapping_wyscout = generar_o_cargar_mapping_wyscout(excel_path, json_path)
+
+
 
 # Configuración de la página
 st.set_page_config(
@@ -113,7 +131,7 @@ def detectar_columnas_por_acciones(df):
         return {'todas': [], 'basicas': [], 'defensivas': [], 'ofensivas': [], 'creacion': [], 'porteros': [], 'fisicas': [], 'otras': []}
     
     todas = list(df.columns)
-    basicas = [col for col in ['jugador', 'equipo_durante_el_período_seleccionado', 'pos_principal', 'edad'] if col in todas]
+    basicas = [col for col in ['Jugador', 'Equipo durante el período seleccionado', 'Pos principal', 'Edad'] if col in todas]
     
     # Clasificación por acciones/zonas
     defensivas = []
@@ -196,7 +214,7 @@ def cargar_datos_wyscout_simple():
     """Carga datos directamente del Excel"""
     try:
         # En lugar de: wyscout_model.get_all_players()
-        df = pd.read_excel('data\wyscout_LaLiga_limpio.xlsx')
+        df = pd.read_excel(r'C:\Users\manue\OneDrive\Escritorio\WebScouting\data\wyscout_LaLiga_limpio.xlsx')
         return df
     except Exception as e:
         st.error(f"Error cargando Excel: {str(e)}")
@@ -204,19 +222,20 @@ def cargar_datos_wyscout_simple():
 
 def cargar_datos_personales_reales():
     """
-    Carga los jugadores directamente de jugadores_observados con TODAS las nuevas columnas
+    Carga los jugadores directamente de jugadores_observados con TODAS las nuevas columnas.
     """
     try:
         import sqlite3
+        import pandas as pd
         conn = sqlite3.connect('data/jugadores.db')
         
-        # Query que NO filtra por total_informes para asegurar que veamos TODOS los jugadores
         query = """
         SELECT 
             id,
             COALESCE(jugador, nombre_completo) as nombre_completo,
             equipo,
-            posicion,
+            posicion_principal,
+            posicion_secundaria,
             numero_camiseta,
             CASE 
                 WHEN edad IS NULL OR edad = 0 THEN NULL
@@ -224,6 +243,11 @@ def cargar_datos_personales_reales():
             END as edad,
             nacionalidad,
             liga,
+            pie_dominante,
+            altura,
+            peso,
+            valor_mercado,
+            elo_besoccer,
             imagen_url,
             escudo_equipo,
             veces_observado,
@@ -235,7 +259,6 @@ def cargar_datos_personales_reales():
             COALESCE(total_informes, 1) as total_informes,
             ultima_fecha_visto,
             scout_agregado,
-            -- Agregar campo de recomendación basado en nota_promedio o nota_general
             CASE 
                 WHEN COALESCE(nota_promedio, nota_general, 0) >= 7 THEN 'Fichar'
                 WHEN COALESCE(nota_promedio, nota_general, 0) >= 5 THEN 'Seguir observando'
@@ -243,7 +266,7 @@ def cargar_datos_personales_reales():
                 ELSE 'Sin evaluar'
             END as recomendacion_calculada
         FROM jugadores_observados
-        WHERE 1=1  -- Sin filtros, mostrar TODOS
+        WHERE 1=1
         ORDER BY 
             COALESCE(nota_promedio, nota_general, 0) DESC,
             COALESCE(total_informes, 0) DESC,
@@ -251,42 +274,32 @@ def cargar_datos_personales_reales():
         """
         
         df = pd.read_sql_query(query, conn)
-        
-        # IMPORTANTE: Para jugadores sin nota_promedio, usar nota_general
-        if not df.empty:
-            # Asegurar que las notas no sean None/NaN
-            df['nota_promedio'] = df.apply(
-                lambda row: row['nota_general'] if pd.isna(row['nota_promedio']) or row['nota_promedio'] == 0 
-                else row['nota_promedio'], 
-                axis=1
-            )
-            
-            df['mejor_nota'] = df.apply(
-                lambda row: row['nota_general'] if pd.isna(row['mejor_nota']) or row['mejor_nota'] == 0 
-                else row['mejor_nota'], 
-                axis=1
-            )
-            
-            df['peor_nota'] = df.apply(
-                lambda row: row['nota_general'] if pd.isna(row['peor_nota']) or row['peor_nota'] == 0 
-                else row['peor_nota'], 
-                axis=1
-            )
-        
         conn.close()
         
-        # Log para debug
+        # Ajustar notas para valores nulos
+        if not df.empty:
+            for campo in ['nota_promedio', 'mejor_nota', 'peor_nota']:
+                df[campo] = df.apply(
+                    lambda row: row['nota_general'] if pd.isna(row[campo]) or row[campo] == 0
+                    else row[campo],
+                    axis=1
+                )
+
         print(f"✅ Cargados {len(df)} jugadores de la base personal")
-        if len(df) > 0:
+        if not df.empty:
             print(f"   Columnas disponibles: {', '.join(df.columns)}")
             print(f"\n   Primeros jugadores:")
             for idx, row in df.head(5).iterrows():
-                print(f"   - {row['nombre_completo']} ({row['equipo']}) - Nota: {row['nota_promedio']:.1f}, Informes: {row['total_informes']}")
+                print(
+                    f"   - {row['nombre_completo']} ({row['equipo']}) "
+                    f"- Edad: {row['edad']} - Nacionalidad: {row['nacionalidad']} "
+                    f"- Pie: {row['pie_dominante']} - Nota: {row['nota_promedio']:.1f}, "
+                    f"Informes: {row['total_informes']}"
+                )
         
         return df
         
     except Exception as e:
-        st.warning(f"Error cargando datos personales: {str(e)}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()
@@ -299,6 +312,117 @@ def cargar_lista_objetivos():
             return data.get("jugadores_seguimiento", [])
     except:
         return []
+
+# Función actualizada para obtener informes con parsing JSON
+
+def obtener_informes_jugador(jugador_nombre, jugador_equipo):
+    """
+    Obtiene todos los informes de scouting de un jugador específico.
+    Ahora incluye `url_besoccer` desde la base de jugadores_observados si no existe en el informe.
+    """
+    try:
+        import sqlite3
+        import json
+
+        # Conexión a la base de datos de partidos
+        conn = sqlite3.connect('data/partidos.db')
+        cursor = conn.cursor()
+
+        # Query para obtener informes con datos del partido
+        cursor.execute('''
+            SELECT 
+                i.id,
+                i.partido_id,
+                i.fecha_creacion,
+                i.nota_general,
+                i.tipo_evaluacion,
+                i.recomendacion,
+                i.observaciones,
+                i.scout_usuario,
+                i.minutos_observados,
+                i.posicion_evaluada as posicion,
+                i.fortalezas,
+                i.debilidades,
+                i.metricas,
+                i.metadata,
+                i.imagen_url,
+                p.equipo_local,
+                p.equipo_visitante,
+                p.fecha as fecha_partido,
+                p.resultado_local,
+                p.resultado_visitante
+            FROM informes_scouting i
+            JOIN partidos p ON i.partido_id = p.id
+            WHERE i.jugador_nombre = ? AND i.equipo = ?
+            ORDER BY i.fecha_creacion DESC
+        ''', (jugador_nombre, jugador_equipo))
+
+        columns = [description[0] for description in cursor.description]
+        informes = []
+
+        for row in cursor.fetchall():
+            informe_dict = dict(zip(columns, row))
+
+            # Parsear campos JSON
+            if informe_dict.get('metricas'):
+                try:
+                    informe_dict['metricas'] = json.loads(informe_dict['metricas'])
+                except:
+                    informe_dict['metricas'] = {}
+
+            if informe_dict.get('metadata'):
+                try:
+                    informe_dict['metadata'] = json.loads(informe_dict['metadata'])
+                except:
+                    informe_dict['metadata'] = {}
+
+            informe_dict['jugador_nombre'] = jugador_nombre
+            informe_dict['equipo'] = jugador_equipo
+
+            # Añadir promedios si existen en métricas
+            if isinstance(informe_dict.get('metricas'), dict):
+                metricas = informe_dict['metricas']
+                if 'promedios' in metricas:
+                    informe_dict['promedio_tecnico'] = metricas['promedios'].get('tecnicos', 0)
+                    informe_dict['promedio_tactico'] = metricas['promedios'].get('tacticos', 0)
+                    informe_dict['promedio_fisico'] = metricas['promedios'].get('fisicos', 0)
+                    informe_dict['promedio_mental'] = metricas['promedios'].get('mentales', 0)
+
+            informes.append(informe_dict)
+
+        conn.close()
+
+        # --- NUEVO BLOQUE: Añadir url_besoccer desde jugadores_observados ---
+        if informes:
+            try:
+                conn_jug = sqlite3.connect('data/jugadores.db')
+                cur_jug = conn_jug.cursor()
+                cur_jug.execute(
+                    "SELECT url_besoccer FROM jugadores_observados WHERE jugador = ? AND equipo = ? LIMIT 1",
+                    (jugador_nombre, jugador_equipo)
+                )
+                result = cur_jug.fetchone()
+                if result and result[0]:
+                    for inf in informes:
+                        inf['url_besoccer'] = result[0]
+                conn_jug.close()
+            except Exception as e:
+                print(f"⚠️ No se pudo obtener url_besoccer desde jugadores.db: {e}")
+
+        return informes
+
+    except Exception as e:
+        print(f"Error obteniendo informes: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# Función para generar nombre de archivo
+def generar_nombre_pdf(jugador_nombre, fecha_partido):
+    """Genera un nombre de archivo limpio para el PDF"""
+    nombre_limpio = jugador_nombre.replace(' ', '_').replace('.', '')
+    fecha_limpia = fecha_partido.replace('-', '')
+    return f"Informe_{nombre_limpio}_{fecha_limpia}.pdf"
 
 # ================================
 # HEADER LIMPIO
@@ -318,6 +442,11 @@ st.markdown(f"""
 # Mostrar spinner solo durante carga inicial
 with st.spinner("Cargando datos..."):
     df_wyscout = cargar_datos_wyscout_simple()
+    # Para tabla principal Wyscout
+    df_mostrar = df_wyscout.copy()
+    df_mostrar.columns = [
+        normalizar_nombre_metrica(col) for col in df_mostrar.columns
+    ]
     df_personal = cargar_datos_personales_reales()
     lista_objetivos = cargar_lista_objetivos()
 
@@ -328,7 +457,7 @@ with st.spinner("Cargando datos..."):
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    total_wyscout = len(df_wyscout) if not df_wyscout.empty else 0
+    total_wyscout = len(df_mostrar) if not df_mostrar.empty else 0
     st.markdown(f"""
     <div class="simple-metric">
         <h3>{total_wyscout:,}</h3>
@@ -380,9 +509,9 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.markdown("### 🌐 Base Wyscout LaLiga")
     
-    if not df_wyscout.empty:
+    if not df_mostrar.empty:
         # Detectar columnas disponibles por acciones
-        info_columnas = detectar_columnas_por_acciones(df_wyscout)
+        info_columnas = detectar_columnas_por_acciones(df_mostrar)
         
         total_metricas = (len(info_columnas['defensivas']) + len(info_columnas['ofensivas']) + 
                          len(info_columnas['creacion']) + len(info_columnas['porteros']) + 
@@ -399,23 +528,23 @@ with tab1:
             busqueda = st.text_input("🔍 Buscar jugador:", key="search")
         
         with col_f2:
-            if 'equipo_durante_el_período_seleccionado' in df_wyscout.columns:
-                equipos = ['Todos'] + sorted(df_wyscout['equipo_durante_el_período_seleccionado'].dropna().unique().tolist())
+            if 'equipo_durante_el_período_seleccionado' in df_mostrar.columns:
+                equipos = ['Todos'] + sorted(df_mostrar['equipo_durante_el_período_seleccionado'].dropna().unique().tolist())
             else:
                 equipos = ['Todos']
             equipo = st.selectbox("🏠 Equipo:", equipos, key="team")
         
         with col_f3:
-            if 'pos_principal' in df_wyscout.columns:
-                posiciones = ['Todas'] + sorted(df_wyscout['pos_principal'].dropna().unique().tolist())
+            if 'pos_principal' in df_mostrar.columns:
+                posiciones = ['Todas'] + sorted(df_mostrar['pos_principal'].dropna().unique().tolist())
             else:
                 posiciones = ['Todas']
             posicion = st.selectbox("⚽ Posición:", posiciones, key="pos")
         
         with col_f4:
-            if 'edad' in df_wyscout.columns:
-                edad_min = int(df_wyscout['edad'].min())
-                edad_max = int(df_wyscout['edad'].max())
+            if 'edad' in df_mostrar.columns:
+                edad_min = int(df_mostrar['edad'].min())
+                edad_max = int(df_mostrar['edad'].max())
                 edad_rango = st.slider("🎂 Edad:", edad_min, edad_max, (edad_min, edad_max), key="age")
             else:
                 edad_rango = (18, 35)
@@ -517,12 +646,12 @@ with tab1:
         
         # Limpiar duplicados
         columnas_mostrar = limpiar_columnas_duplicadas(columnas_seleccionadas)
-        columnas_mostrar = [col for col in columnas_mostrar if col in df_wyscout.columns]
+        columnas_mostrar = [col for col in columnas_mostrar if col in df_mostrar.columns]
         
         st.success(f"✅ {len(columnas_mostrar)} columnas configuradas")
         
         # APLICAR FILTROS
-        df_filtrado = df_wyscout.copy()
+        df_filtrado = df_mostrar.copy()
         
         if busqueda and 'jugador' in df_filtrado.columns:
             df_filtrado = df_filtrado[df_filtrado['jugador'].str.contains(busqueda, case=False, na=False)]
@@ -572,7 +701,7 @@ with tab1:
             column_config = {}
             for col in columnas_mostrar:
                 if col in df_mostrar.columns:
-                    clean_name = col.replace('_', ' ').replace(',_', '').title()
+                    clean_name = col.title()
                     
                     if df_mostrar[col].dtype in ['float64', 'int64']:
                         if col in ['edad', 'goles', 'asistencias']:
@@ -639,12 +768,14 @@ with tab1:
         st.error("❌ Error cargando datos Wyscout")
 
 # ==================== PESTAÑA 2: BASE PERSONAL ====================
+# Reemplazo corregido para la sección de Base Personal (within tab2)
+
 with tab2:
     st.markdown("### 👤 Mi Base Personal")
     st.caption("Solo jugadores con informes de scouting reales")
     
     if not df_personal.empty:
-        # Filtros simples
+        # Filtros simples (mantener los existentes)
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         
         with col_f1:
@@ -669,7 +800,6 @@ with tab2:
             if 'nota_promedio' in df_personal.columns and not df_personal['nota_promedio'].isna().all():
                 nota_min = float(df_personal['nota_promedio'].min())
                 nota_max = float(df_personal['nota_promedio'].max())
-                # Asegurar que todos los valores son float y agregar step
                 nota_rango = st.slider(
                     "⭐ Nota Media:", 
                     min_value=0.0, 
@@ -688,7 +818,7 @@ with tab2:
                     key="nota_range"
                 )
         
-        # Aplicar filtros
+        # Aplicar filtros (mantener código existente)
         df_personal_filtrado = df_personal.copy()
         
         if busqueda_personal and 'nombre_completo' in df_personal_filtrado.columns:
@@ -702,14 +832,10 @@ with tab2:
         if recomendacion_filtro != 'Todas' and 'recomendacion_calculada' in df_personal_filtrado.columns:
             df_personal_filtrado = df_personal_filtrado[df_personal_filtrado['recomendacion_calculada'] == recomendacion_filtro]
         
-        # Filtro por nota - CORREGIDO para manejar valores None/NaN
         if 'nota_promedio' in df_personal_filtrado.columns:
-            # Convertir a float y manejar NaN
             df_personal_filtrado['nota_promedio'] = pd.to_numeric(df_personal_filtrado['nota_promedio'], errors='coerce')
-            
-            # Aplicar filtro solo a valores no-NaN
             mask = (
-                df_personal_filtrado['nota_promedio'].isna() |  # Incluir NaN
+                df_personal_filtrado['nota_promedio'].isna() |
                 (
                     (df_personal_filtrado['nota_promedio'] >= nota_rango[0]) & 
                     (df_personal_filtrado['nota_promedio'] <= nota_rango[1])
@@ -723,7 +849,7 @@ with tab2:
             # Preparar DataFrame para mostrar
             df_vista = df_personal_filtrado.copy()
             
-            # Agregar emoji de recomendación para mejor visualización
+            # Agregar emoji de recomendación
             if 'recomendacion_calculada' in df_vista.columns:
                 df_vista['recomendacion_visual'] = df_vista['recomendacion_calculada'].apply(
                     lambda x: '🟢 Fichar' if x == 'Fichar' else 
@@ -732,31 +858,34 @@ with tab2:
                              '⚪ Sin evaluar'
                 )
             
-            # Definir TODAS las columnas a mostrar (incluyendo imagen)
-            columnas_completas = [
+            # OPCIÓN 1: Tabla sin la columna de informes (más limpia)
+            # Columnas a mostrar (sin la nueva columna problemática)
+            columnas_tabla = [
                 'imagen_url',
                 'nombre_completo', 
                 'equipo',
                 'escudo_equipo',
-                'posicion',
+                'posicion_principal',
+                'posicion_secundaria',
                 'numero_camiseta',
                 'edad',
                 'nacionalidad',
+                'pie_dominante',     
+                'altura',            
+                'peso',              
+                'valor_mercado',
+                'elo_besoccer',     
                 'liga',
                 'nota_promedio',
-                'mejor_nota',
-                'peor_nota',
                 'total_informes',
-                'veces_observado',
-                'ultima_fecha_visto',
                 'recomendacion_visual',
                 'scout_agregado'
             ]
             
             # Filtrar solo columnas disponibles
-            columnas_disponibles = [col for col in columnas_completas if col in df_vista.columns]
+            columnas_disponibles = [col for col in columnas_tabla if col in df_vista.columns]
             
-            # Configuración completa de columnas
+            # Configuración de columnas
             column_config = {
                 'imagen_url': st.column_config.ImageColumn(
                     "Foto",
@@ -777,18 +906,34 @@ with tab2:
                     width="small",
                     help="Escudo del equipo"
                 ),
-                'posicion': st.column_config.TextColumn(
-                    "Posición", 
-                    width="small"
+                'posicion_principal': st.column_config.TextColumn(
+                    "Posición Principal", 
+                    width="small",
+                    help="Posición principal del jugador"
+                ),
+                'posicion_secundaria': st.column_config.TextColumn(
+                    "Posición Secundaria", 
+                    width="small",
+                    help="Posición secundaria del jugador"
                 ),
                 'numero_camiseta': st.column_config.TextColumn(
                     "Dorsal", 
-                    width="small"
+                    width="small",
+                    help="Número de camiseta"
                 ),
                 'edad': st.column_config.NumberColumn(
                     "Edad", 
                     format="%d",
                     width="small"
+                ),
+                'pie_dominante': st.column_config.TextColumn(
+                    "Pie", width="small", help="Pie dominante"
+                ),
+                'altura': st.column_config.NumberColumn(
+                    "Altura (cm)", format="%d", width="small"
+                ),
+                'peso': st.column_config.NumberColumn(
+                    "Peso (kg)", format="%d", width="small"
                 ),
                 'nacionalidad': st.column_config.TextColumn(
                     "País", 
@@ -798,6 +943,12 @@ with tab2:
                     "Liga", 
                     width="medium"
                 ),
+                'valor_mercado': st.column_config.TextColumn(
+                    "Valor Mercado", width="medium", help="Valor de mercado"
+                ),
+                'elo_besoccer': st.column_config.NumberColumn(
+                    "ELO", format="%d", width="small", help="Puntuación ELO (BeSoccer)"
+                ),
                 'nota_promedio': st.column_config.ProgressColumn(
                     "Nota Media",
                     width="small",
@@ -805,30 +956,10 @@ with tab2:
                     min_value=0,
                     max_value=10
                 ),
-                'mejor_nota': st.column_config.NumberColumn(
-                    "Mejor", 
-                    format="%.0f",
-                    width="small"
-                ),
-                'peor_nota': st.column_config.NumberColumn(
-                    "Peor", 
-                    format="%.0f",
-                    width="small"
-                ),
                 'total_informes': st.column_config.NumberColumn(
-                    "Informes", 
+                    "N° Informes", 
                     format="%d",
                     width="small"
-                ),
-                'veces_observado': st.column_config.NumberColumn(
-                    "Veces Visto", 
-                    format="%d",
-                    width="small"
-                ),
-                'ultima_fecha_visto': st.column_config.DateColumn(
-                    "Última Vez", 
-                    width="small",
-                    format="DD/MM/YYYY"
                 ),
                 'recomendacion_visual': st.column_config.TextColumn(
                     "Recomendación",
@@ -842,17 +973,223 @@ with tab2:
                 )
             }
             
-            # Mostrar tabla completa con todas las funcionalidades
+            # Mostrar tabla
             st.dataframe(
                 df_vista[columnas_disponibles],
                 use_container_width=True,
-                height=600,  # Altura mayor para mejor visualización
+                height=400,  # Altura reducida para dejar espacio
                 column_config=column_config,
                 hide_index=True
             )
             
-            # Estadísticas mejoradas con más información
-            st.markdown("#### 📊 Estadísticas")
+            # OPCIÓN 2: SECCIÓN DE INFORMES MEJORADA (debajo de la tabla)
+            st.markdown("---")
+            st.markdown("### 📄 Informes Detallados")
+            
+            # Selector de jugador para ver informes
+            col_selector1, col_selector2 = st.columns([3, 1])
+            
+            with col_selector1:
+                # Crear lista de jugadores con formato nombre - equipo
+                jugadores_con_informes = df_personal_filtrado[df_personal_filtrado['total_informes'] > 0]
+                
+                if not jugadores_con_informes.empty:
+                    opciones_jugadores = [
+                        f"{row['nombre_completo']} - {row['equipo']} ({row['total_informes']} informe{'s' if row['total_informes'] != 1 else ''})"
+                        for idx, row in jugadores_con_informes.iterrows()
+                    ]
+                    
+                    jugador_seleccionado = st.selectbox(
+                        "Selecciona un jugador para ver sus informes:",
+                        options=[''] + opciones_jugadores,
+                        key="selector_jugador_informes"
+                    )
+                else:
+                    st.info("No hay jugadores con informes en los filtros actuales")
+                    jugador_seleccionado = ''
+            
+            with col_selector2:
+                if st.button("🔄 Actualizar", use_container_width=True, help="Recargar informes"):
+                    st.rerun()
+            
+            # Mostrar informes del jugador seleccionado
+            if jugador_seleccionado and jugador_seleccionado != '':
+                # Extraer nombre y equipo del string seleccionado
+                nombre_equipo = jugador_seleccionado.split(' - ')
+                nombre_jugador = nombre_equipo[0]
+                equipo_jugador = nombre_equipo[1].split(' (')[0]
+                
+                # Buscar el jugador en el DataFrame
+                jugador_data = jugadores_con_informes[
+                    (jugadores_con_informes['nombre_completo'] == nombre_jugador) & 
+                    (jugadores_con_informes['equipo'] == equipo_jugador)
+                ].iloc[0]
+                
+                # Container para los informes
+                with st.container():
+                    # Header del jugador
+                    col_header1, col_header2 = st.columns([1, 4])
+                    
+                    with col_header1:
+                        if pd.notna(jugador_data.get('imagen_url')) and jugador_data['imagen_url'] != '':
+                            st.image(jugador_data['imagen_url'], width=100)
+                        else:
+                            st.markdown("### 👤")
+                    
+                    with col_header2:
+                        st.markdown(f"### {jugador_data['nombre_completo']}")
+                        st.caption(f"{jugador_data['equipo']} • {jugador_data.get('posicion', 'N/A')} • {jugador_data.get('edad', 'N/A')} años")
+                        st.write(f"**Nota promedio:** {jugador_data['nota_promedio']:.1f}/10 • **Total informes:** {jugador_data['total_informes']}")
+                    
+                    st.markdown("---")
+                    
+                    # Obtener informes del jugador
+                    informes = obtener_informes_jugador(jugador_data['nombre_completo'], jugador_data['equipo'])
+                    
+                    if informes:
+                        # Inicializar generador de PDF si está disponible
+                        if PDF_DISPONIBLE:
+                            pdf_generator = PDFGenerator()
+                        
+                        # Mostrar cada informe
+                        for i, informe in enumerate(informes):
+                            # Container para cada informe
+                            with st.container():
+                                col1, col2, col3 = st.columns([3, 1.5, 0.5])
+                                
+                                with col1:
+                                    fecha_informe = informe['fecha_creacion'][:10] if informe['fecha_creacion'] else "N/A"
+                                    tipo_eval = "🎥 Análisis Completo" if informe['tipo_evaluacion'] == 'video_completo' else "⚽ Evaluación en Campo"
+                                    
+                                    st.markdown(f"#### 📅 {fecha_informe}")
+                                    st.write(f"**Partido:** {informe['equipo_local']} vs {informe['equipo_visitante']}")
+                                    st.write(f"**Tipo:** {tipo_eval}")
+                                    st.write(f"**Scout:** {informe['scout_usuario']}")
+                                
+                                with col2:
+                                    # Nota con color
+                                    nota = informe['nota_general']
+                                    if nota >= 7:
+                                        st.success(f"⭐ **Nota: {nota}/10**")
+                                    elif nota >= 5:
+                                        st.warning(f"⭐ **Nota: {nota}/10**")
+                                    else:
+                                        st.error(f"⭐ **Nota: {nota}/10**")
+                                    
+                                    # Recomendación
+                                    rec_text = {
+                                        'fichar': '✅ Fichar',
+                                        'contratar': '✅ Fichar',
+                                        'seguir_observando': '🔍 Seguir',
+                                        'seguir': '🔍 Seguir',
+                                        'descartar': '❌ Descartar'
+                                    }.get(informe.get('recomendacion', ''), informe.get('recomendacion', 'N/A'))
+                                    st.caption(f"**Decisión:** {rec_text}")
+                                
+                                with col3:
+                                    # Botón de descarga PDF
+                                    if PDF_DISPONIBLE and st.button("📥", key=f"pdf_btn_{i}", help="Descargar PDF"):
+                                        try:
+                                            with st.spinner("Generando PDF..."):
+                                                # Preparar datos del jugador
+                                                jugador_pdf_data = {
+                                                    'nombre_completo': jugador_data['nombre_completo'],
+                                                    'equipo': jugador_data['equipo'],
+                                                    'edad': jugador_data.get('edad'),
+                                                    'nacionalidad': jugador_data.get('nacionalidad'),
+                                                    'liga': jugador_data.get('liga'),
+                                                    'imagen_url': jugador_data.get('imagen_url', ''),
+                                                    'scout_agregado': jugador_data.get('scout_agregado', 'Scout'),
+                                                    'posicion': jugador_data.get('posicion', 'N/A')
+                                                }
+                                                
+                                                print("=== DEBUG: INFORME ANTES DE PDF ===")
+                                                print(json.dumps(informe, indent=4, ensure_ascii=False))
+                                                print(f"URL_BESOCCER (informe): {informe.get('url_besoccer')}")
+
+                                                # Buscar URL de BeSoccer en el informe o, si no existe, en jugador_data
+                                                url_besoccer = informe.get('url_besoccer')
+                                                if not url_besoccer and informe.get('metadata') and isinstance(informe['metadata'], dict):
+                                                    url_besoccer = informe['metadata'].get('url_besoccer')
+                                                if not url_besoccer:
+                                                    url_besoccer = jugador_data.get('url_besoccer')
+
+                                                print(f"DEBUG FINAL: URL_BESOCCER = {url_besoccer}")
+                                                
+                                                # Intentar obtener datos de BeSoccer si tenemos la URL
+                                                datos_besoccer = None
+                                                if url_besoccer:
+                                                    try:
+                                                        from utils.besoccer_scraper import BeSoccerScraper
+                                                        scraper = BeSoccerScraper()
+                                                        datos_besoccer = scraper.obtener_datos_perfil_jugador(url_besoccer)
+                                                        print(f"✅ Datos de BeSoccer obtenidos para PDF")
+                                                    except Exception as e:
+                                                        print(f"⚠️ No se pudieron obtener datos de BeSoccer: {e}")
+                                                
+                                                # Asegurar que el informe tenga los campos necesarios
+                                                if 'jugador_nombre' not in informe:
+                                                    informe['jugador_nombre'] = jugador_data['nombre_completo']
+                                                if 'equipo' not in informe:
+                                                    informe['equipo'] = jugador_data['equipo']
+                                                
+                                                # Inicializar el generador
+                                                pdf_generator = PDFGenerator()
+                                                
+                                                # Generar el PDF usando el método existente
+                                                # El tercer parámetro es datos_wyscout, pero podemos pasar datos_besoccer
+                                                # ya que la función solo busca campos específicos
+                                                pdf_content = pdf_generator.generar_informe_pdf(
+                                                    informe_data=informe,
+                                                    jugador_data=jugador_pdf_data,
+                                                    datos_wyscout=datos_besoccer,  # Pasamos datos de BeSoccer aquí
+                                                    radar_path=None  # Se generará automáticamente
+                                                )
+                                                
+                                                if pdf_content:
+                                                    # Nombre del archivo
+                                                    fecha_informe = informe.get('fecha_creacion', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))[:10]
+                                                    nombre_archivo = generar_nombre_pdf(
+                                                        jugador_data['nombre_completo'], 
+                                                        fecha_informe
+                                                    )
+                                                    
+                                                    # Justo antes del st.download_button, añade esta conversión:
+                                                    if isinstance(pdf_content, bytearray):
+                                                        pdf_content = bytes(pdf_content)
+
+                                                    # Luego el botón de descarga normal
+                                                    st.download_button(
+                                                        label="💾 Descargar PDF",
+                                                        data=pdf_content,
+                                                        file_name=nombre_archivo,
+                                                        mime="application/pdf",
+                                                        key=f"download_{i}"
+                                                    )
+                                                    print("=== DEBUG: DATOS_BESOCCER ===")
+                                                    import json
+                                                    print(json.dumps(datos_besoccer, indent=4, ensure_ascii=False))
+                                                else:
+                                                    st.error("Error generando el PDF")
+                                                    
+                                        except Exception as e:
+                                            st.error(f"Error: {str(e)}")
+                                            import traceback
+                                            traceback.print_exc()
+                                
+                                # Mostrar extracto de observaciones
+                                with st.expander("📝 Ver observaciones", expanded=False):
+                                    observaciones = informe.get('observaciones', 'Sin observaciones')
+                                    st.text_area("Observaciones del scout:", observaciones, height=150, disabled=True, key=f"obs_scout_{informe.get('id', 0)}")
+                                
+                                # Línea divisoria entre informes
+                                if i < len(informes) - 1:
+                                    st.markdown("---")
+                    else:
+                        st.warning("No se encontraron informes detallados para este jugador")
+            
+            # Estadísticas (mantener código existente)
+            st.markdown("#### 📊 Estadísticas Generales")
             
             col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
 
@@ -891,18 +1228,15 @@ with tab2:
                 else:
                     st.metric("🏆 Ligas", "N/A")
             
-            # Top jugadores - CORREGIDO
+            # Top jugadores (mantener código existente)
             if 'nota_promedio' in df_vista.columns and len(df_vista) > 0:
-                # Filtrar jugadores con nota válida
                 df_con_nota = df_vista[df_vista['nota_promedio'].notna() & (df_vista['nota_promedio'] > 0)]
                 
                 if len(df_con_nota) > 0:
                     st.markdown("#### 🏆 Top 5 Mejores Jugadores")
                     
-                    # Obtener top 5
                     top_jugadores = df_con_nota.nlargest(5, 'nota_promedio')
                     
-                    # Mostrar top jugadores con formato especial
                     for idx, (_, jugador) in enumerate(top_jugadores.iterrows()):
                         col1, col2, col3 = st.columns([1, 3, 1])
                         
@@ -923,7 +1257,6 @@ with tab2:
                             if 'recomendacion_visual' in jugador:
                                 st.caption(jugador['recomendacion_visual'])
                             else:
-                                # Calcular recomendación si no existe
                                 nota = jugador['nota_promedio']
                                 if nota >= 7:
                                     st.caption("🟢 Fichar")
@@ -956,7 +1289,6 @@ with tab2:
                 3. Evalúa jugadores y guarda informes
                 4. Los jugadores aparecerán automáticamente aquí
                 """)
-
 # ==================== PESTAÑA 3: LISTA OBJETIVOS ====================
 with tab3:
     st.markdown("### 👀 Lista de Objetivos")
@@ -1038,10 +1370,10 @@ with tab4:
         resultados_total = 0
         
         # Wyscout
-        if scope in ["Todas las bases", "Solo Wyscout"] and not df_wyscout.empty:
-            if 'jugador' in df_wyscout.columns:
-                wyscout_results = df_wyscout[
-                    df_wyscout['jugador'].str.contains(busqueda_global, case=False, na=False)
+        if scope in ["Todas las bases", "Solo Wyscout"] and not df_mostrar.empty:
+            if 'jugador' in df_mostrar.columns:
+                wyscout_results = df_mostrar[
+                    df_mostrar['jugador'].str.contains(busqueda_global, case=False, na=False)
                 ].head(5)
                 
                 if not wyscout_results.empty:

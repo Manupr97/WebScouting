@@ -47,7 +47,7 @@ def crear_informe_scouting(informe_data):
                 'nombre': informe_data.get('jugador_nombre'),
                 'numero': informe_data.get('numero_camiseta', ''),
                 'posicion': informe_data.get('posicion', ''),
-                'imagen_url': informe_data.get('imagen_url', '')
+                'imagen_url': informe_data.get('imagen_url', ''),
             }
             
             partido_data = {
@@ -337,7 +337,7 @@ def actualizar_estadisticas_desde_informes(nombre_jugador, equipo):
         traceback.print_exc()
         return False
     
-def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, informe_id):
+# def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, informe_id):
     """
     Actualiza o crea un jugador en la base personal SOLO cuando se guarda un informe
     Esta es la ÚNICA función que debe añadir jugadores a la base personal
@@ -387,6 +387,13 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
             nuevo_veces_observado = veces_observado + 1
             nuevo_total_informes = (total_informes or 0) + 1
             
+            # Después de definir los valores actuales, añadir:
+            url_besoccer = jugador_data.get('url_besoccer', '')
+            altura = jugador_data.get('altura')
+            peso = jugador_data.get('peso')
+            valor_mercado = jugador_data.get('valor_mercado', '')
+            elo_besoccer = jugador_data.get('elo_besoccer')
+
             # Actualizar registro con reintentos
             update_query = """
                 UPDATE jugadores_observados
@@ -400,7 +407,12 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                     besoccer_id = COALESCE(NULLIF(?, ''), besoccer_id),
                     datos_json = ?,
                     posicion = COALESCE(NULLIF(?, ''), posicion),
-                    scout_agregado = COALESCE(scout_agregado, ?)
+                    scout_agregado = COALESCE(scout_agregado, ?),
+                    url_besoccer = COALESCE(NULLIF(?, ''), url_besoccer),
+                    altura = COALESCE(?, altura),
+                    peso = COALESCE(?, peso),
+                    valor_mercado = COALESCE(NULLIF(?, ''), valor_mercado),
+                    elo_besoccer = COALESCE(?, elo_besoccer)
                 WHERE id = ?
             """
             
@@ -416,6 +428,11 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                 json.dumps(datos_adicionales),
                 jugador_data.get('posicion', ''),
                 scout_usuario,
+                url_besoccer,
+                altura,
+                peso,
+                valor_mercado,
+                elo_besoccer,
                 jugador_id
             )
             
@@ -448,8 +465,8 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                     imagen_url, escudo_equipo, ultimo_partido_id,
                     ultima_fecha_visto, scout_agregado, besoccer_id,
                     datos_json, fecha_agregado, estado, veces_observado,
-                    nombre_completo, nota_general, total_informes, liga
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    nombre_completo, nota_general, total_informes, liga, url_besoccer, elo_besoccer, altura, peso, valor_mercado
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             
             params = (
@@ -465,12 +482,17 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
                 partido_data.get('besoccer_id', ''),
                 json.dumps(datos_adicionales),
                 datetime.now(),
-                'Evaluado',  # Estado inicial cuando se crea desde informe
-                1,  # Primera vez observado
-                jugador_data['nombre'],  # nombre_completo
-                partido_data.get('nota_evaluacion', 0),  # nota_general inicial
-                1,  # Primer informe
-                liga
+                'Evaluado',
+                1,
+                jugador_data['nombre'],
+                partido_data.get('nota_evaluacion', 0),
+                1,
+                liga,
+                jugador_data.get('url_besoccer', ''),    # ✅ Añadir
+                jugador_data.get('elo_besoccer'),         # ✅ Añadir
+                jugador_data.get('altura'),               # ✅ Añadir
+                jugador_data.get('peso'),                 # ✅ Añadir
+                jugador_data.get('valor_mercado', '')     # ✅ Añadir
             )
             
             ejecutar_con_reintentos(conn, insert_query, params)
@@ -488,3 +510,188 @@ def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, 
         import traceback
         traceback.print_exc()
         return False
+    
+def actualizar_jugador_desde_informe(jugador_data, partido_data, scout_usuario, informe_id, datos_extra=None):
+    """
+    Actualiza o crea un jugador en la base personal SOLO cuando se guarda un informe.
+    Si se pasa datos_extra (del scraper BeSoccer), se actualizan edad, nacionalidad, liga, pie, altura y peso.
+    """
+    try:
+        conn = sqlite3.connect('data/jugadores.db', timeout=20.0)
+        conn.execute("PRAGMA busy_timeout = 10000")
+        cursor = conn.cursor()
+
+        # Asegurar que el campo 'equipo' esté presente en jugador_data
+        if 'equipo' not in jugador_data or not jugador_data['equipo']:
+            jugador_data['equipo'] = (
+                partido_data.get('equipo') or
+                partido_data.get('equipo_local') or
+                partido_data.get('equipo_visitante') or
+                "Equipo desconocido"
+            )
+
+        # Combinar datos extra (si existen)
+        if datos_extra:
+            # Copiar campos clave
+            for key in ['edad', 'nacionalidad', 'valor_mercado', 'elo',
+                        'posicion_principal', 'posicion_secundaria',
+                        'altura', 'peso']:
+                if datos_extra.get(key):
+                    jugador_data[key] = datos_extra[key]
+
+            # Mapear pie_preferido -> pie_dominante
+            if datos_extra.get('pie_preferido'):
+                jugador_data['pie_dominante'] = datos_extra['pie_preferido']
+
+            # Liga actual y URL perfil
+            if datos_extra.get('liga_actual'):
+                partido_data['competicion'] = datos_extra['liga_actual']
+            if datos_extra.get('url_besoccer'):
+                jugador_data['url_besoccer'] = datos_extra['url_besoccer']
+            if datos_extra.get('escudo_equipo'):
+                jugador_data['escudo_equipo'] = datos_extra['escudo_equipo']
+
+        # Verificar si el jugador ya existe
+        cursor.execute("""
+            SELECT id, veces_observado, datos_json, total_informes
+            FROM jugadores_observados 
+            WHERE jugador = ? AND equipo = ?
+        """, (jugador_data['nombre'], jugador_data['equipo']))
+        
+        jugador_existente = cursor.fetchone()
+
+        if jugador_existente:
+            # ACTUALIZAR jugador existente
+            jugador_id, veces_observado, datos_json_str, total_informes = jugador_existente
+            
+            datos_adicionales = json.loads(datos_json_str) if datos_json_str else {}
+            if 'informes_realizados' not in datos_adicionales:
+                datos_adicionales['informes_realizados'] = []
+            datos_adicionales['informes_realizados'].append({
+                'informe_id': informe_id,
+                'partido_id': partido_data['id'],
+                'fecha': partido_data['fecha'],
+                'nota': partido_data.get('nota_evaluacion', 0),
+                'recomendacion': partido_data.get('recomendacion', ''),
+                'scout': scout_usuario,
+                'fecha_informe': datetime.now().isoformat()
+            })
+            
+            nuevo_veces_observado = veces_observado + 1
+            nuevo_total_informes = (total_informes or 0) + 1
+
+            update_query = """
+                UPDATE jugadores_observados
+                SET 
+                    numero_camiseta = COALESCE(NULLIF(?, ''), numero_camiseta),
+                    imagen_url = COALESCE(NULLIF(?, ''), imagen_url),
+                    escudo_equipo = COALESCE(NULLIF(?, ''), escudo_equipo),
+                    ultimo_partido_id = ?,
+                    ultima_fecha_visto = ?,
+                    veces_observado = ?,
+                    total_informes = ?,
+                    datos_json = ?,
+                    posicion_principal = COALESCE(NULLIF(?, ''), posicion_principal),
+                    scout_agregado = COALESCE(scout_agregado, ?),
+                    url_besoccer = COALESCE(NULLIF(?, ''), url_besoccer),
+                    edad = COALESCE(?, edad),
+                    nacionalidad = COALESCE(NULLIF(?, ''), nacionalidad),
+                    valor_mercado = COALESCE(NULLIF(?, ''), valor_mercado),
+                    elo_besoccer = COALESCE(?, elo_besoccer),
+                    liga = COALESCE(NULLIF(?, ''), liga),
+                    altura = COALESCE(?, altura),
+                    peso = COALESCE(?, peso),
+                    pie_dominante = COALESCE(NULLIF(?, ''), pie_dominante),
+                    posicion_secundaria = COALESCE(NULLIF(?, ''), posicion_secundaria)
+                WHERE id = ?
+            """
+            params = (
+                jugador_data.get('numero', ''),
+                jugador_data.get('imagen_url', ''),
+                jugador_data.get('escudo_equipo', ''),
+                partido_data['id'],
+                datetime.now().strftime('%Y-%m-%d'),
+                nuevo_veces_observado,
+                nuevo_total_informes,
+                json.dumps(datos_adicionales),
+                jugador_data.get('posicion_principal', ''),
+                scout_usuario,
+                jugador_data.get('url_besoccer', ''),
+                jugador_data.get('edad'),
+                jugador_data.get('nacionalidad', ''),
+                jugador_data.get('valor_mercado', ''),
+                jugador_data.get('elo', jugador_data.get('elo_besoccer')),
+                partido_data.get('competicion', 'Desconocida'),
+                jugador_data.get('altura'),
+                jugador_data.get('peso'),
+                jugador_data.get('pie_dominante', ''),
+                jugador_data.get('posicion_secundaria'),
+                jugador_id
+            )
+            ejecutar_con_reintentos(conn, update_query, params)
+            
+            print(f"✅ Jugador actualizado: {jugador_data['nombre']} - Informe #{nuevo_total_informes}")
+        else:
+            # CREAR nuevo jugador
+            datos_adicionales = {
+                'informes_realizados': [{
+                    'informe_id': informe_id,
+                    'partido_id': partido_data['id'],
+                    'fecha': partido_data['fecha'],
+                    'nota': partido_data.get('nota_evaluacion', 0),
+                    'recomendacion': partido_data.get('recomendacion', ''),
+                    'scout': scout_usuario,
+                    'fecha_informe': datetime.now().isoformat()
+                }],
+                'origen': 'informe_scouting',
+                'fecha_primera_observacion': datetime.now().isoformat()
+            }
+            insert_query = """
+                INSERT INTO jugadores_observados (
+                    jugador, equipo, posicion_principal, numero_camiseta,
+                    imagen_url, escudo_equipo, ultimo_partido_id,
+                    ultima_fecha_visto, scout_agregado, datos_json,
+                    fecha_agregado, estado, veces_observado, nombre_completo,
+                    nota_general, total_informes, liga, url_besoccer, edad,
+                    nacionalidad, valor_mercado, elo_besoccer, altura, peso, pie_dominante, posicion_secundaria
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            params = (
+                jugador_data['nombre'],
+                jugador_data['equipo'],
+                jugador_data.get('posicion_principal', 'Por determinar'),
+                jugador_data.get('numero', ''),
+                jugador_data.get('imagen_url', ''),
+                jugador_data.get('escudo_equipo', ''),
+                partido_data['id'],
+                datetime.now().strftime('%Y-%m-%d'),
+                scout_usuario,
+                json.dumps(datos_adicionales),
+                datetime.now(),
+                'Evaluado',
+                1,
+                jugador_data['nombre'],
+                partido_data.get('nota_evaluacion', 0),
+                1,
+                partido_data.get('competicion', 'Desconocida'),
+                jugador_data.get('url_besoccer', ''),
+                jugador_data.get('edad'),
+                jugador_data.get('nacionalidad', ''),
+                jugador_data.get('valor_mercado', ''),
+                jugador_data.get('elo', jugador_data.get('elo_besoccer')),
+                jugador_data.get('altura'),
+                jugador_data.get('peso'),
+                jugador_data.get('pie_dominante', ''),
+                jugador_data.get('posicion_secundaria')
+            )
+            ejecutar_con_reintentos(conn, insert_query, params)
+            
+            print(f"✅ Nuevo jugador añadido desde informe: {jugador_data['nombre']} ({jugador_data['equipo']})")
+        
+        conn.close()
+        actualizar_estadisticas_desde_informes(jugador_data['nombre'], jugador_data['equipo'])
+        return True
+    except Exception as e:
+        print(f"❌ Error actualizando jugador desde informe: {e}")
+        return False
+

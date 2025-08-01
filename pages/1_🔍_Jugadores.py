@@ -339,7 +339,7 @@ def crear_card_jugador_compacta(jugador_data, tipo_recomendacion):
     
     # Determinar clase CSS según tipo
     css_class = {
-        'contratar': 'recom-contratar',
+        'contratar': 'fichar',
         'seguir_observando': 'recom-seguir',
         'interes_moderado': 'recom-cartera',
         'seguir': 'recom-seguir',
@@ -348,7 +348,7 @@ def crear_card_jugador_compacta(jugador_data, tipo_recomendacion):
     
     # Icono según recomendación
     icono = {
-        'contratar': '🟢',
+        'fichar': '🟢',
         'seguir_observando': '🟡',
         'interes_moderado': '🔵',
         'seguir': '🟡',
@@ -593,7 +593,7 @@ try:
             """, unsafe_allow_html=True)
         
         with col2:
-            contratar = recom_counts.get('contratar', 0)
+            contratar = recom_counts.get('fichar', 0)
             st.markdown(f"""
             <div class="metric-card" style="background: linear-gradient(135deg, #28a745, #1e7e34);">
                 <div style="font-size: 24px; font-weight: bold;">{contratar}</div>
@@ -689,7 +689,7 @@ try:
             </div>
             """, unsafe_allow_html=True)
             
-            contratar_jugadores = jugadores_agrupados[jugadores_agrupados['recomendacion'] == 'contratar']
+            contratar_jugadores = jugadores_agrupados[jugadores_agrupados['recomendacion'] == 'fichar']
             
             if not contratar_jugadores.empty:
                 for _, jugador in contratar_jugadores.head(5).iterrows():
