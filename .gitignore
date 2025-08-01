@@ -69,3 +69,8 @@ logs/
 desktop.ini
 Thumbs.db
 .DS_Store
+
+# ✅ Incluir manualmente estas dos bases aunque estén en data/
+!data/jugadores.db
+!data/partidos.db
+!data/lista_visualizacion.json
