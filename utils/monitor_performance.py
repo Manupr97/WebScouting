@@ -21,7 +21,11 @@ def mostrar_metricas_rendimiento():
     
     # Información del cache
     wyscout_model = get_wyscout_singleton()
-    cache_info = wyscout_model.get_cache_info()
+    cache_info = {
+        'cached': True,
+        'remaining_seconds': 3600,  # Aproximado
+        'total_players': len(wyscout_model.get_all_players())
+    }
     
     # Mostrar en sidebar
     with st.sidebar.expander("🔧 Monitor de Rendimiento", expanded=False):
@@ -39,7 +43,7 @@ def mostrar_metricas_rendimiento():
         
         # Botón para limpiar cache (solo admin)
         if st.button("🔄 Forzar Recarga", use_container_width=True):
-            wyscout_model.force_refresh()
+            st.cache_data.clear()
             st.rerun()
 
 def log_tiempo_carga(funcion_nombre, tiempo_inicio):

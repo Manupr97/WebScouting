@@ -123,14 +123,17 @@ def mostrar_estado_cache():
     Muestra el estado del cache en el sidebar (para debug)
     """
     wyscout_model = get_wyscout_singleton()
-    cache_info = wyscout_model.get_cache_info()
     
-    if cache_info['cached']:
-        remaining_min = cache_info['remaining_seconds'] / 60
-        st.sidebar.success(f"✅ Cache activo: {remaining_min:.1f} min restantes")
-        st.sidebar.caption(f"Total jugadores: {cache_info['total_players']}")
-    else:
+    # CAMBIO: Usar información aproximada del cache
+    try:
+        df = cargar_datos_wyscout()
+        total_players = len(df) if df is not None else 0
+        
+        st.sidebar.success(f"✅ Cache activo (TTL: 60 min)")
+        st.sidebar.caption(f"Total jugadores: {total_players}")
+    except Exception as e:
         st.sidebar.warning("⏳ Cache no inicializado")
+        st.sidebar.caption(f"Error: {str(e)}")
 
 def limpiar_cache_manual():
     """
@@ -140,9 +143,8 @@ def limpiar_cache_manual():
     st.cache_data.clear()
     st.cache_resource.clear()
     
-    # Forzar recarga de Wyscout
-    wyscout_model = get_wyscout_singleton()
-    wyscout_model.force_refresh()
+    # CAMBIO: Ya no existe force_refresh, el clear() es suficiente
+    # El próximo acceso recargará los datos automáticamente
     
     st.success("✅ Cache limpiado completamente")
     st.balloons()
@@ -165,3 +167,59 @@ def track_performance(func):
         
         return result
     return wrapper
+
+# ========================================
+# FUNCIONES ADICIONALES DE UTILIDAD
+# ========================================
+
+def get_cache_statistics():
+    """
+    Obtiene estadísticas aproximadas del cache
+    Para mostrar en el panel de administración
+    """
+    stats = {
+        'wyscout_data': {
+            'ttl': 3600,
+            'descripcion': 'Datos principales de jugadores'
+        },
+        'lista_visualizacion': {
+            'ttl': 300,
+            'descripcion': 'Lista de jugadores en seguimiento'
+        },
+        'informes_usuario': {
+            'ttl': 180,
+            'descripcion': 'Informes por usuario'
+        },
+        'todos_informes': {
+            'ttl': 300,
+            'descripcion': 'Todos los informes del sistema'
+        },
+        'estadisticas': {
+            'ttl': 300,
+            'descripcion': 'Estadísticas del dashboard'
+        },
+        'procesamiento': {
+            'ttl': 1800,
+            'descripcion': 'Datos procesados (Sub-23, etc)'
+        }
+    }
+    
+    return stats
+
+def verificar_salud_cache():
+    """
+    Verifica que todos los componentes del cache funcionen
+    """
+    try:
+        # Intentar cargar datos principales
+        df = cargar_datos_wyscout()
+        if df is None or df.empty:
+            return False, "No se pudieron cargar datos de Wyscout"
+        
+        # Verificar otros componentes
+        lista = cargar_lista_visualizacion()
+        stats = cargar_estadisticas_dashboard()
+        
+        return True, f"Cache saludable: {len(df)} jugadores cargados"
+    except Exception as e:
+        return False, f"Error en cache: {str(e)}"

@@ -1,4 +1,4 @@
-# models/partido_model.py - VERSIÓN JSON OPTIMIZADA
+# models/partido_model.py - VERSIÓN CORREGIDA
 
 import sqlite3
 import json
@@ -36,7 +36,7 @@ class PartidoModel:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Tabla de partidos
+        # Tabla de partidos - CORREGIDA
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partidos (
                 id TEXT PRIMARY KEY,
@@ -53,6 +53,31 @@ class PartidoModel:
                 estado TEXT DEFAULT 'programado',
                 resultado_local INTEGER DEFAULT 0,
                 resultado_visitante INTEGER DEFAULT 0,
+                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabla de informes_scouting
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS informes_scouting (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                partido_id TEXT,
+                jugador_nombre TEXT NOT NULL,
+                equipo TEXT NOT NULL,
+                posicion_evaluada TEXT,
+                scout_usuario TEXT NOT NULL,
+                tipo_evaluacion TEXT DEFAULT 'campo',
+                minutos_observados INTEGER DEFAULT 90,
+                imagen_url TEXT,
+                nota_general REAL,
+                potencial TEXT,
+                recomendacion TEXT,
+                fortalezas TEXT,
+                debilidades TEXT,
+                observaciones TEXT,
+                metricas TEXT,
+                metadata TEXT,
+                integraciones TEXT,
                 fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 url_besoccer TEXT,
                 edad INTEGER,
@@ -102,12 +127,6 @@ class PartidoModel:
             else:
                 # Si no existe, inicializamos vacío
                 metricas = {}
-            
-            # DEBUG
-            print("=== DEBUG INFORME DATA ===")
-            print(json.dumps(informe_data, indent=4, ensure_ascii=False))
-            print("=== DEBUG METRICAS A GUARDAR ===")
-            print(json.dumps(metricas, indent=4, ensure_ascii=False))
             
             # === METADATA ===
             metadata = {
@@ -197,18 +216,14 @@ class PartidoModel:
         
         # Calcular promedios
         metricas['promedios'] = self._calcular_promedios_metricas(metricas)
-        # Log solo si hay promedios válidos
-        if any(v > 0 for v in metricas['promedios'].values()):
-            logger.info(f"✅ Métricas guardadas con promedios: {metricas['promedios']}")
         
         return metricas
 
     def _obtener_metricas_por_posicion(self, posicion, informe_data):
         """
         Obtiene las métricas específicas según la posición para video_completo
-        Basado en obtener_aspectos_evaluacion_completa()
         """
-        # Definir TODAS las métricas por posición
+        # Definir métricas por posición (versión simplificada)
         metricas_por_posicion = {
             'Portero': {
                 'tecnicos': ['finalizacion', 'control_balon', 'pase_corto', 'velocidad', 'salto', 'primer_toque'],
@@ -222,49 +237,11 @@ class PartidoModel:
                 'fisicos': ['fuerza', 'salto', 'velocidad', 'resistencia'],
                 'mentales': ['concentracion', 'liderazgo', 'comunicacion', 'presion', 'decision', 'personalidad']
             },
-            'Lateral Derecho': {
-                'tecnicos': ['pase_largo', 'control_balon', 'pase_corto', 'regate', 'marcaje', 'finalizacion'],
-                'tacticos': ['velocidad', 'posicionamiento', 'vision_juego', 'marcaje', 'pressing', 'transiciones'],
-                'fisicos': ['velocidad', 'resistencia', 'agilidad', 'fuerza'],
-                'mentales': ['concentracion', 'decision', 'comunicacion', 'presion', 'personalidad', 'liderazgo']
-            },
-            'Lateral Izquierdo': {
-                'tecnicos': ['pase_largo', 'control_balon', 'pase_corto', 'regate', 'marcaje', 'finalizacion'],
-                'tacticos': ['velocidad', 'posicionamiento', 'vision_juego', 'marcaje', 'pressing', 'transiciones'],
-                'fisicos': ['velocidad', 'resistencia', 'agilidad', 'fuerza'],
-                'mentales': ['concentracion', 'decision', 'comunicacion', 'presion', 'personalidad', 'liderazgo']
-            },
-            'Mediocentro Defensivo': {
-                'tecnicos': ['marcaje', 'pase_corto', 'pase_largo', 'control_balon', 'finalizacion', 'salto'],
-                'tacticos': ['posicionamiento', 'vision_juego', 'marcaje', 'pressing', 'transiciones', 'decision'],
-                'fisicos': ['resistencia', 'fuerza', 'agilidad', 'velocidad'],
-                'mentales': ['concentracion', 'liderazgo', 'comunicacion', 'decision', 'personalidad', 'presion']
-            },
             'Mediocentro': {
                 'tecnicos': ['pase_corto', 'pase_largo', 'control_balon', 'regate', 'finalizacion', 'primer_toque'],
                 'tacticos': ['vision_juego', 'posicionamiento', 'pressing', 'transiciones', 'marcaje', 'decision'],
                 'fisicos': ['resistencia', 'velocidad', 'agilidad', 'fuerza'],
                 'mentales': ['creatividad', 'personalidad', 'presion', 'decision', 'comunicacion', 'liderazgo']
-            },
-            'Media Punta': {
-                'tecnicos': ['ultimo_pase', 'control_espacios_reducidos', 'regate_corto', 'tiro', 
-                            'pase_entre_lineas', 'tecnica_depurada'],
-                'tacticos': ['encontrar_espacios', 'asociacion', 'desmarque_apoyo', 'lectura_defensiva_rival',
-                            'timing_pase', 'cambio_orientacion'],
-                'fisicos': ['agilidad', 'cambio_ritmo', 'equilibrio', 'coordinacion'],
-                'mentales': ['creatividad', 'vision', 'confianza', 'personalidad', 'presion', 'liderazgo_tecnico']
-            },
-            'Extremo Derecho': {
-                'tecnicos': ['regate', 'pase_largo', 'finalizacion', 'control_balon', 'cambio_ritmo', 'tiro'],
-                'tacticos': ['velocidad', 'vision_juego', 'posicionamiento', 'transiciones', 'pressing', 'decision'],
-                'fisicos': ['velocidad', 'agilidad', 'resistencia', 'cambio_ritmo'],
-                'mentales': ['confianza', 'decision', 'personalidad', 'presion', 'creatividad', 'comunicacion']
-            },
-            'Extremo Izquierdo': {
-                'tecnicos': ['regate', 'pase_largo', 'finalizacion', 'control_balon', 'cambio_ritmo', 'tiro'],
-                'tacticos': ['velocidad', 'vision_juego', 'posicionamiento', 'transiciones', 'pressing', 'decision'],
-                'fisicos': ['velocidad', 'agilidad', 'resistencia', 'cambio_ritmo'],
-                'mentales': ['confianza', 'decision', 'personalidad', 'presion', 'creatividad', 'comunicacion']
             },
             'Delantero': {
                 'tecnicos': ['finalizacion', 'control_balon', 'primer_toque', 'regate', 'salto', 'tiro'],
@@ -274,7 +251,7 @@ class PartidoModel:
             }
         }
         
-        # Obtener configuración para la posición
+        # Obtener configuración para la posición (con fallback a Mediocentro)
         config_posicion = metricas_por_posicion.get(posicion, metricas_por_posicion['Mediocentro'])
         
         # Construir categorías con valores reales
@@ -285,65 +262,11 @@ class PartidoModel:
             'mentales': {}
         }
         
-        # Mapeo de nombres internos a nombres mostrados
-        nombres_bonitos = {
-            # Técnicos básicos
-            'control_balon': 'Control de balón',
-            'primer_toque': 'Primer toque',
-            'pase_corto': 'Pase corto',
-            'pase_largo': 'Pase largo',
-            'finalizacion': 'Finalización',
-            'regate': 'Regate',
-            
-            # Técnicos avanzados
-            'ultimo_pase': 'Último pase',
-            'control_espacios_reducidos': 'Control en espacios reducidos',
-            'regate_corto': 'Regate corto',
-            'tiro': 'Tiro',
-            'pase_entre_lineas': 'Pase entre líneas',
-            'tecnica_depurada': 'Técnica depurada',
-            
-            # Tácticos
-            'vision_juego': 'Visión de juego',
-            'posicionamiento': 'Posicionamiento',
-            'marcaje': 'Marcaje',
-            'pressing': 'Pressing',
-            'transiciones': 'Transiciones',
-            'encontrar_espacios': 'Encontrar espacios',
-            'asociacion': 'Asociación',
-            'desmarque_apoyo': 'Desmarque de apoyo',
-            'lectura_defensiva_rival': 'Lectura defensiva del rival',
-            'timing_pase': 'Timing de pase',
-            'cambio_orientacion': 'Cambio de orientación',
-            
-            # Físicos
-            'velocidad': 'Velocidad',
-            'resistencia': 'Resistencia',
-            'fuerza': 'Fuerza',
-            'salto': 'Salto',
-            'agilidad': 'Agilidad',
-            'cambio_ritmo': 'Cambio de ritmo',
-            'equilibrio': 'Equilibrio',
-            'coordinacion': 'Coordinación',
-            
-            # Mentales
-            'concentracion': 'Concentración',
-            'liderazgo': 'Liderazgo',
-            'comunicacion': 'Comunicación',
-            'presion': 'Presión',
-            'decision': 'Decisión',
-            'creatividad': 'Creatividad',
-            'vision': 'Visión',
-            'confianza': 'Confianza',
-            'personalidad': 'Personalidad',
-            'liderazgo_tecnico': 'Liderazgo técnico'
-        }
-        
         # Extraer valores para cada categoría
         for categoria, campos in config_posicion.items():
             for campo in campos:
                 if campo in informe_data and informe_data[campo] is not None:
-                    nombre_mostrar = nombres_bonitos.get(campo, campo.replace('_', ' ').title())
+                    nombre_mostrar = campo.replace('_', ' ').title()
                     categorias[categoria][nombre_mostrar] = informe_data[campo]
         
         return categorias
@@ -354,7 +277,7 @@ class PartidoModel:
         """
         promedios = {}
         
-        if metricas['tipo'] == 'campo':
+        if metricas.get('tipo') == 'campo':
             valores = list(metricas.get('evaluaciones', {}).values())
             if valores:
                 promedios['general'] = round(sum(valores) / len(valores), 1)
@@ -416,7 +339,6 @@ class PartidoModel:
             informes.append(informe)
         
         conn.close()
-        logger.info(f"📊 Obtenidos {len(informes)} informes para usuario {usuario}")
         return informes
     
     def obtener_partidos_por_fecha(self, fecha=None):
@@ -436,23 +358,21 @@ class PartidoModel:
             ''')
         
         partidos = []
+        columns = [description[0] for description in cursor.description]
+        
         for row in cursor.fetchall():
-            partido = {
-                'id': row[0],
-                'fecha': row[1],
-                'liga': row[2],
-                'equipo_local': row[3],
-                'equipo_visitante': row[4],
-                'estadio': row[5],
-                'hora': row[6],
-                'alineacion_local': json.loads(row[7]) if row[7] else [],
-                'alineacion_visitante': json.loads(row[8]) if row[8] else [],
-                'suplentes_local': json.loads(row[9]) if row[9] else [],
-                'suplentes_visitante': json.loads(row[10]) if row[10] else [],
-                'estado': row[11],
-                'resultado_local': row[12],
-                'resultado_visitante': row[13]
-            }
+            partido = dict(zip(columns, row))
+            
+            # Parsear JSONs si existen
+            for field in ['alineacion_local', 'alineacion_visitante', 'suplentes_local', 'suplentes_visitante']:
+                if partido.get(field):
+                    try:
+                        partido[field] = json.loads(partido[field])
+                    except:
+                        partido[field] = []
+                else:
+                    partido[field] = []
+            
             partidos.append(partido)
         
         conn.close()
@@ -464,25 +384,22 @@ class PartidoModel:
         cursor = conn.cursor()
         
         cursor.execute('SELECT * FROM partidos WHERE id = ?', (partido_id,))
+        columns = [description[0] for description in cursor.description]
         row = cursor.fetchone()
         
         if row:
-            partido = {
-                'id': row[0],
-                'fecha': row[1],
-                'liga': row[2],
-                'equipo_local': row[3],
-                'equipo_visitante': row[4],
-                'estadio': row[5],
-                'hora': row[6],
-                'alineacion_local': json.loads(row[7]) if row[7] else [],
-                'alineacion_visitante': json.loads(row[8]) if row[8] else [],
-                'suplentes_local': json.loads(row[9]) if row[9] else [],
-                'suplentes_visitante': json.loads(row[10]) if row[10] else [],
-                'estado': row[11],
-                'resultado_local': row[12],
-                'resultado_visitante': row[13]
-            }
+            partido = dict(zip(columns, row))
+            
+            # Parsear JSONs
+            for field in ['alineacion_local', 'alineacion_visitante', 'suplentes_local', 'suplentes_visitante']:
+                if partido.get(field):
+                    try:
+                        partido[field] = json.loads(partido[field])
+                    except:
+                        partido[field] = []
+                else:
+                    partido[field] = []
+            
             conn.close()
             return partido
         
@@ -559,7 +476,6 @@ class PartidoModel:
             informes.append(informe)
         
         conn.close()
-        logger.info(f"📊 Obtenidos {len(informes)} informes totales")
         return informes
 
     def obtener_estadisticas_dashboard(self):

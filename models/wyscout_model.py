@@ -2,7 +2,6 @@ import pandas as pd
 import streamlit as st
 from pathlib import Path
 import os
-import time
 
 # FUNCIÓN GLOBAL PARA CACHE DE STREAMLIT
 @st.cache_data(ttl=3600)
@@ -21,8 +20,8 @@ def cargar_datos_wyscout(data_path):
         # Detectar columnas automáticamente
         column_patterns = {
             'player': ['player', 'name', 'nombre', 'jugador', 'full name', 'apellidos'],
-            'team': ['team', 'club', 'equipo', 'squad'],
-            'position': ['position', 'pos', 'posicion', 'posición', 'role'],
+            'team': ['team', 'club', 'equipo', 'squad', 'equipo_durante_el_período_seleccionado'],
+            'position': ['position', 'pos', 'posicion', 'posición', 'role', 'pos_principal'],
             'age': ['age', 'edad', 'años'],
             'goals': ['goals', 'goles', 'goal'],
             'assists': ['assists', 'asistencias', 'assist'],
@@ -49,38 +48,20 @@ def cargar_datos_wyscout(data_path):
         return pd.DataFrame(), {}
 
 class WyscoutModel:
-    _instance = None
-    _initialized = False
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        # Solo inicializar una vez
-        if not WyscoutModel._initialized:
-            self.data_path = Path("data/wyscout_LaLiga_limpio.xlsx")
-            self._df = None
-            self._detected_columns = {}
-            self._column_mapping = {}
-            WyscoutModel._initialized = True
-    
-    def load_data(self):
-        """Carga los datos usando la función cacheada global"""
-        # ESTO ES LO IMPORTANTE: Usar la función global cacheada
-        self._df, self._detected_columns = cargar_datos_wyscout(str(self.data_path))
-        return self._df, self._detected_columns
+        self.data_path = Path("data/wyscout_LaLiga_limpio.xlsx")
+        self._detected_columns = None
     
     def get_all_players(self):
-        """Lee directamente del Excel cada vez"""
-        return pd.read_excel(self.data_path)
+        """Obtiene todos los jugadores usando el cache de Streamlit"""
+        df, self._detected_columns = cargar_datos_wyscout(str(self.data_path))
+        return df
     
     def get_detected_columns(self):
         """Obtiene el mapeo de columnas detectadas"""
-        if not self._detected_columns:
-            self.load_data()
-        return self._detected_columns
+        if self._detected_columns is None:
+            self.get_all_players()  # Esto cargará las columnas
+        return self._detected_columns or {}
     
     def get_column_name(self, standard_name):
         """Obtiene el nombre real de la columna basado en el nombre estándar"""
@@ -247,28 +228,3 @@ class WyscoutModel:
         stats_cols = [col for col in df.columns if col not in basic_cols]
         
         return stats_cols
-    
-    def force_refresh(self):
-        """Fuerza una recarga del cache"""
-        WyscoutModel._cache_timestamp = None
-        self._df = None
-        self._detected_columns = {}
-        self.get_all_players()  # Esto recargará los datos
-    
-    def get_cache_info(self):
-        """Retorna información sobre el estado del cache"""
-        if WyscoutModel._cache_timestamp:
-            elapsed = time.time() - WyscoutModel._cache_timestamp
-            remaining = max(0, self._cache_duration - elapsed)
-            return {
-                'cached': True,
-                'elapsed_seconds': elapsed,
-                'remaining_seconds': remaining,
-                'total_players': len(WyscoutModel._data_cache) if WyscoutModel._data_cache is not None else 0
-            }
-        return {
-            'cached': False,
-            'elapsed_seconds': 0,
-            'remaining_seconds': 0,
-            'total_players': 0
-        }
