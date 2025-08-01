@@ -74,7 +74,7 @@ class WyscoutModel:
     
     def get_all_players(self):
         """Lee directamente del Excel cada vez"""
-        return pd.read_excel('data\wyscout_LaLiga_limpio.xlsx')
+        return pd.read_excel(self.data_path)
     
     def get_detected_columns(self):
         """Obtiene el mapeo de columnas detectadas"""
