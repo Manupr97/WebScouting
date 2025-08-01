@@ -1,6 +1,5 @@
 [server]
 # Puerto donde correrá la aplicación
-port = 8501
 maxUploadSize = 200
 maxMessageSize = 200
 
@@ -11,10 +10,7 @@ enableCORS = true
 enableXsrfProtection = true
 
 # Ejecutar en modo headless (sin abrir navegador)
-headless = false
-
-# Dirección donde se ejecuta
-address = "localhost"
+headless = true
 
 [browser]
 # Recopilar estadísticas de uso
@@ -52,9 +48,6 @@ showSidebarNavigation = true
 [runner]
 # Habilitar magic commands (%%, !)
 magicEnabled = true
-
-# Instalar watchdog para auto-reload
-fastReruns = true
 
 [logger]
 # Nivel de log
