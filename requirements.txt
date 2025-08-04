@@ -12,7 +12,5 @@ xlrd>=2.0.1
 psutil
 lxml
 mplsoccer
-
 fuzzywuzzy
-
 fpdf2
