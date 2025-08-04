@@ -46,7 +46,7 @@ class LoginManager:
         # Crear usuario admin por defecto si no existe
         cursor.execute("SELECT COUNT(*) FROM usuarios WHERE usuario = ?", ("admin",))
         if cursor.fetchone()[0] == 0:
-            admin_password = self.hash_password("admin123")
+            admin_password = self.hash_password("admin")
             cursor.execute('''
                 INSERT INTO usuarios (usuario, password, nombre, email, rol)
                 VALUES (?, ?, ?, ?, ?)
@@ -136,7 +136,7 @@ class LoginManager:
         st.info("""
         **🧪 Credenciales de prueba:**
         - Usuario: `admin`
-        - Contraseña: `admin123`
+        - Contraseña: `admin`
         """)
     
     def logout(self):
