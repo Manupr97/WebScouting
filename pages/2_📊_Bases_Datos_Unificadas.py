@@ -1091,101 +1091,27 @@ with tab2:
                                     }.get(informe.get('recomendacion', ''), informe.get('recomendacion', 'N/A'))
                                     st.caption(f"**Decisión:** {rec_text}")
                                 
-                                with col3:
-                                    # Botón de descarga PDF
-                                    if PDF_DISPONIBLE and st.button("📥", key=f"pdf_btn_{i}", help="Descargar PDF"):
-                                        try:
-                                            with st.spinner("Generando PDF..."):
-                                                # Preparar datos del jugador
-                                                jugador_pdf_data = {
-                                                    'nombre_completo': jugador_data['nombre_completo'],
-                                                    'equipo': jugador_data['equipo'],
-                                                    'edad': jugador_data.get('edad'),
-                                                    'nacionalidad': jugador_data.get('nacionalidad'),
-                                                    'liga': jugador_data.get('liga'),
-                                                    'imagen_url': jugador_data.get('imagen_url', ''),
-                                                    'scout_agregado': jugador_data.get('scout_agregado', 'Scout'),
-                                                    'posicion': jugador_data.get('posicion', 'N/A')
-                                                }
-                                                
-                                                print("=== DEBUG: INFORME ANTES DE PDF ===")
-                                                print(json.dumps(informe, indent=4, ensure_ascii=False))
-                                                print(f"URL_BESOCCER (informe): {informe.get('url_besoccer')}")
-
-                                                # Buscar URL de BeSoccer en el informe o, si no existe, en jugador_data
-                                                url_besoccer = informe.get('url_besoccer')
-                                                if not url_besoccer and informe.get('metadata') and isinstance(informe['metadata'], dict):
-                                                    url_besoccer = informe['metadata'].get('url_besoccer')
-                                                if not url_besoccer:
-                                                    url_besoccer = jugador_data.get('url_besoccer')
-
-                                                print(f"DEBUG FINAL: URL_BESOCCER = {url_besoccer}")
-                                                
-                                                # Intentar obtener datos de BeSoccer si tenemos la URL
-                                                datos_besoccer = None
-                                                if url_besoccer:
-                                                    try:
-                                                        from utils.besoccer_scraper import BeSoccerScraper
-                                                        scraper = BeSoccerScraper()
-                                                        datos_besoccer = scraper.obtener_datos_perfil_jugador(url_besoccer)
-                                                        print(f"✅ Datos de BeSoccer obtenidos para PDF")
-                                                    except Exception as e:
-                                                        print(f"⚠️ No se pudieron obtener datos de BeSoccer: {e}")
-                                                
-                                                # Asegurar que el informe tenga los campos necesarios
-                                                if 'jugador_nombre' not in informe:
-                                                    informe['jugador_nombre'] = jugador_data['nombre_completo']
-                                                if 'equipo' not in informe:
-                                                    informe['equipo'] = jugador_data['equipo']
-                                                
-                                                # Inicializar el generador
-                                                pdf_generator = PDFGenerator()
-                                                
-                                                # Generar el PDF usando el método existente
-                                                # El tercer parámetro es datos_wyscout, pero podemos pasar datos_besoccer
-                                                # ya que la función solo busca campos específicos
-                                                pdf_content = pdf_generator.generar_informe_pdf(
-                                                    informe_data=informe,
-                                                    jugador_data=jugador_pdf_data,
-                                                    datos_wyscout=datos_besoccer,  # Pasamos datos de BeSoccer aquí
-                                                    radar_path=None  # Se generará automáticamente
-                                                )
-                                                
-                                                if pdf_content:
-                                                    # Nombre del archivo
-                                                    fecha_informe = informe.get('fecha_creacion', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))[:10]
-                                                    nombre_archivo = generar_nombre_pdf(
-                                                        jugador_data['nombre_completo'], 
-                                                        fecha_informe
-                                                    )
-                                                    
-                                                    # Justo antes del st.download_button, añade esta conversión:
-                                                    if isinstance(pdf_content, bytearray):
-                                                        pdf_content = bytes(pdf_content)
-
-                                                    # Luego el botón de descarga normal
-                                                    st.download_button(
-                                                        label="💾 Descargar PDF",
-                                                        data=pdf_content,
-                                                        file_name=nombre_archivo,
-                                                        mime="application/pdf",
-                                                        key=f"download_{i}"
-                                                    )
-                                                    print("=== DEBUG: DATOS_BESOCCER ===")
-                                                    import json
-                                                    print(json.dumps(datos_besoccer, indent=4, ensure_ascii=False))
-                                                else:
-                                                    st.error("Error generando el PDF")
-                                                    
-                                        except Exception as e:
-                                            st.error(f"Error: {str(e)}")
-                                            import traceback
-                                            traceback.print_exc()
-                                
                                 # Mostrar extracto de observaciones
                                 with st.expander("📝 Ver observaciones", expanded=False):
+                                    # 1) Observaciones por categoría
+                                    categorias = informe.get('metricas', {}).get('categorias', {})
+                                    if categorias:
+                                        st.markdown("#### Observaciones por Categoría")
+                                        for cat, obs_dict in categorias.items():
+                                            st.markdown(f"**{cat.capitalize()}**")
+                                            for metrica, valor in obs_dict.items():
+                                                st.write(f"- {metrica}: {valor}/10")
+                                        st.markdown("---")
+                                    # 2) Observaciones generales (resumen ejecutivo)
                                     observaciones = informe.get('observaciones', 'Sin observaciones')
-                                    st.text_area("Observaciones del scout:", observaciones, height=150, disabled=True, key=f"obs_scout_{informe.get('id', 0)}")
+                                    st.markdown("#### Observaciones generales")
+                                    st.text_area(
+                                        "",
+                                        observaciones,
+                                        height=150,
+                                        disabled=True,
+                                        key=f"obs_scout_{informe.get('id', 0)}"
+                                    )
                                 
                                 # Línea divisoria entre informes
                                 if i < len(informes) - 1:

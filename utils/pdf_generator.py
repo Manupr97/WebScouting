@@ -197,7 +197,7 @@ class PDFGenerator:
         
         return url_original
     
-    def crear_radar_chart_scout_individual(self, informe_data):
+    # def crear_radar_chart_scout_individual(self, informe_data):
         """
         Crea un radar chart con mplsoccer para el informe individual.
         Soporta métricas con categorías (video_completo) o simples (campo).
@@ -278,10 +278,116 @@ class PDFGenerator:
             print(f"❌ ERROR Radar mplsoccer: {e}")
             return None
     
+    def crear_radar_chart_scout_individual(self, informe_data):
+        """
+        Crea un radar chart con mplsoccer para el informe individual.
+        VERSIÓN CORREGIDA - Maneja mejor los casos edge y asegura mínimo 3 parámetros.
+        """
+        try:
+            print("🔍 DEBUG: Iniciando radar con mplsoccer")
+
+            # --- 1. Extraer métricas ---
+            metricas_raw = informe_data.get('metricas', {})
+            if isinstance(metricas_raw, str):
+                try:
+                    metricas = json.loads(metricas_raw)
+                except json.JSONDecodeError:
+                    print("❌ ERROR: No se pudo parsear métricas JSON")
+                    return None
+            else:
+                metricas = metricas_raw
+
+            if not metricas:
+                print("⚠ No hay métricas disponibles")
+                return None
+
+            # --- 2. Determinar si hay categorías ---
+            tiene_categorias = all(k in metricas for k in ['tecnicos', 'tacticos', 'fisicos', 'mentales'])
+            params, values = [], []
+
+            if tiene_categorias:
+                print("🔍 DEBUG: Radar de informe completo")
+                categorias = ['tecnicos', 'tacticos', 'fisicos', 'mentales']
+                labels = ['Técnico', 'Táctico', 'Físico', 'Mental']
+
+                for cat, label in zip(categorias, labels):
+                    categoria_data = metricas.get(cat, {})
+                    if isinstance(categoria_data, dict):
+                        valores_num = [v for v in categoria_data.values() if isinstance(v, (int, float))]
+                    else:
+                        valores_num = []
+                    
+                    promedio = np.mean(valores_num) if valores_num else 5.0
+                    params.append(label)
+                    values.append(float(promedio))
+            else:
+                print("🔍 DEBUG: Radar de informe campo")
+                for k, v in metricas.items():
+                    if isinstance(v, (int, float)) and len(params) < 8:  # Limitar a 8 para no saturar
+                        params.append(str(k)[:15])  # Truncar nombres largos
+                        values.append(float(v))
+                
+                # CORRECCIÓN CRÍTICA: Asegurar mínimo 3 parámetros para mplsoccer
+                while len(params) < 3:
+                    params.append(f"Aspecto {len(params) + 1}")
+                    values.append(5.0)  # Valor neutral
+
+            # Verificar que tenemos datos válidos
+            if len(params) < 3 or len(values) < 3:
+                print("⚠ Insuficientes parámetros para radar (mínimo 3)")
+                return None
+
+            # Asegurar que todos los valores son numéricos
+            values = [float(v) if isinstance(v, (int, float)) else 5.0 for v in values]
+
+            # --- 3. Crear radar ---
+            low = [0] * len(params)
+            high = [10] * len(params)
+
+            print(f"🔍 DEBUG: Creando radar con {len(params)} parámetros: {params}")
+            print(f"🔍 DEBUG: Valores: {values}")
+
+            radar = Radar(
+                params, low, high,
+                num_rings=4, ring_width=1, center_circle_radius=1
+            )
+
+            fig, ax = radar.setup_axis()
+            radar.draw_circles(ax=ax, facecolor="#B8BABC", edgecolor="#24282a")
+            radar.draw_radar(
+                values, ax=ax,
+                kwargs_radar={'facecolor': '#007bff', 'alpha': 0.6},
+                kwargs_rings={'facecolor': "#048676", 'alpha': 0.2}
+            )
+            radar.draw_range_labels(ax=ax, fontsize=12)
+            radar.draw_param_labels(ax=ax, fontsize=14, fontweight='bold', color='#24282a')
+
+            # --- 4. Guardar radar ---
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                radar_path = tmp.name
+                plt.savefig(radar_path, dpi=150, bbox_inches='tight', facecolor='white')
+                plt.close(fig)
+
+            print(f"✅ Radar guardado en {radar_path}")
+            return radar_path
+
+        except Exception as e:
+            print(f"❌ ERROR Radar mplsoccer: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def _dibujar_barra_progreso_pdf(self, pdf, valor, maximo, width=100, height=8, color=None):
         """
         Dibuja una barra de progreso con color dinámico según el valor
         """
+        try:
+            valor = float(valor) if valor is not None else 0.0
+            maximo = float(maximo) if maximo is not None else 10.0
+        except (ValueError, TypeError):
+            valor = 0.0
+            maximo = 10.0
+        
         # Calcular porcentaje
         porcentaje = (valor / maximo) * 100 if maximo > 0 else 0
         
@@ -518,6 +624,9 @@ class PDFGenerator:
             import requests
             from io import BytesIO
 
+            if radar_path is None:
+                radar_path = self.crear_radar_chart_scout_individual(informe_data)
+
             # --- Datos del jugador con BeSoccer ---
             datos_besoccer = datos_wyscout or {}
 
@@ -694,7 +803,6 @@ class PDFGenerator:
             pdf.cell(0, 8, f"NOTA GENERAL: {nota_general}/10", 0, 1, 'C')
 
             # Radar chart (si existe)
-            radar_path = self.crear_radar_chart_scout_individual(informe_data)
             if radar_path and os.path.exists(radar_path):
                 ancho_radar = 170
                 x_radar = (pdf.w - ancho_radar) / 2
@@ -711,13 +819,44 @@ class PDFGenerator:
             # Llamada corregida - pasamos informe_data completo
             self._dibujar_evaluacion_pdf(pdf, informe_data)
 
-            # Observaciones del scout
+            # ==== NUEVO BLOQUE: Observaciones por Categoría ====
+            categorias = informe_data.get('metricas', {}).get('categorias', {})
+            if categorias:
+                pdf.set_font('Helvetica', 'B', 14)
+                pdf.cell(0, 10, "Observaciones por Categoría", 0, 1)
+                pdf.set_font('Helvetica', '', 10)
+                for cat, obs_dict in categorias.items():
+                    # cat = 'tecnicos', 'tacticos', etc.
+                    nombre_cat = cat.capitalize()
+                    # obs_dict: {'regates': 8, 'pases': 7, …}
+                    textos = [f"{metrica}: {valor}" for metrica, valor in obs_dict.items()]
+                    linea = "; ".join(textos) if textos else "Sin observaciones"
+                    pdf.multi_cell(0, 6, f"{nombre_cat}: {linea}")
+                pdf.ln(5)
+
+            # === OBSERVACIONES DEL SCOUT ===
             pdf.set_font('Helvetica', 'B', 14)
             pdf.cell(0, 10, "Observaciones del Scout", 0, 1)
             pdf.set_font('Helvetica', '', 10)
+
+            # 1) Observaciones por Categoría
+            categorias = informe_data.get('metricas', {}).get('categorias', {})
+            if categorias:
+                for cat, obs_dict in categorias.items():
+                    # título de la categoría
+                    pdf.set_font('Helvetica', 'B', 11)
+                    pdf.cell(0, 6, f"{cat.capitalize()}:", 0, 1)
+                    # lista de métricas
+                    pdf.set_font('Helvetica', '', 10)
+                    textos = [f"{metrica}: {valor}/10" for metrica, valor in obs_dict.items()]
+                    pdf.multi_cell(0, 5, "; ".join(textos))
+                    pdf.ln(2)
+
+            # 2) Observaciones generales
+            pdf.set_font('Helvetica', '','10')
             pdf.multi_cell(0, 6, informe_data.get('observaciones', 'Sin observaciones'))
 
-            return bytes(pdf.output(dest='S'))
+            return bytes(pdf.output(dest='latin-1'))
         except Exception as e:
             print(f"❌ Error generando PDF: {e}")
             return None
