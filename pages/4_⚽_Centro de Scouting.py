@@ -2626,10 +2626,10 @@ with st.sidebar:
     
     # Navegación
     if st.button("📊 Dashboard", use_container_width=True):
-        st.switch_page("pages/1_🔍_Jugadores.py")
+        st.switch_page("1_🔍_Jugadores")
     
     if st.button("📋 Mis Informes", use_container_width=True):
-        st.switch_page("pages/5_📋_Mis_Informes.py")
+        st.switch_page("5_📋_Mis_Informes")
     
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         login_manager.logout()

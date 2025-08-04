@@ -924,10 +924,10 @@ with st.sidebar:
     st.markdown("### 🚀 Acciones Rápidas")
     
     if st.button("📋 Ver Todos los Informes", use_container_width=True):
-        st.switch_page("pages/5_📋_Mis_Informes.py")
+        st.switch_page("5_📋_Mis_Informes")
     
     if st.button("📊 Análisis Avanzado", use_container_width=True):
-        st.switch_page("pages/3_📊_Visualizaciones.py")
+        st.switch_page("3_📊_Visualizaciones")
     
     st.markdown("---")
     
@@ -961,7 +961,7 @@ with st.sidebar:
             st.metric("👤 Sin Scout Asignado", stats_lista["sin_scout"])
             
             if st.button("📋 Ver Lista Completa", use_container_width=True):
-                st.switch_page("pages/6_👀_Lista_Visualizacion.py")
+                st.switch_page("6_👀_Lista_Visualizacion")
                 
     except Exception:
         pass
