@@ -481,12 +481,9 @@ class JugadorModel:
             conn.close()
 
     def añadir_jugador_manual(self, nombre, equipo, posicion='N/A', nota_promedio=5, scout='admin', informe_id=None):
-        """
-        Añade un jugador a la BD personal de forma SIMPLE e INDEPENDIENTE
-        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Ver si ya existe
             cursor.execute('''
@@ -494,48 +491,60 @@ class JugadorModel:
                 FROM jugadores_observados 
                 WHERE (jugador = ? OR nombre_completo = ?) AND equipo = ?
             ''', (nombre, nombre, equipo))
-            
+
             existe = cursor.fetchone()
-            
+
             if existe:
                 jugador_id, veces_actual, nota_anterior = existe
-                # Calcular nueva nota promedio
                 nueva_nota = ((nota_anterior or 0) * veces_actual + nota_promedio) / (veces_actual + 1)
-                
+
                 cursor.execute('''
                     UPDATE jugadores_observados SET
                         veces_observado = veces_observado + 1,
                         nota_general = ?,
-                        fecha_observacion = ?,
-                        posicion = COALESCE(?, posicion),
-                        estado = 'Evaluado'
+                        nota_promedio = ?,
+                        mejor_nota = MAX(mejor_nota, ?),
+                        peor_nota = MIN(peor_nota, ?),
+                        total_informes = total_informes + 1,
+                        ultima_fecha_visto = ?,
+                        scout_agregado = ?
                     WHERE id = ?
-                ''', (nueva_nota, datetime.now().strftime('%Y-%m-%d'), posicion, jugador_id))
-                
+                ''', (
+                    nueva_nota, nueva_nota, nota_promedio, nota_promedio,
+                    datetime.now().strftime('%Y-%m-%d'), scout, jugador_id
+                ))
+
             else:
-                # Crear nuevo - SOLO en jugadores_observados, NADA de Wyscout
+                # Crear jugador nuevo con todos los campos mínimos
                 cursor.execute('''
                     INSERT INTO jugadores_observados (
-                        jugador, nombre_completo, equipo, posicion,
-                        fecha_observacion, scout, nota_general, 
-                        veces_observado, estado
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        jugador, nombre_completo, equipo, posicion_principal,
+                        edad, nacionalidad, liga, pie_dominante, altura, peso,
+                        valor_mercado, elo_besoccer, imagen_url, escudo_equipo,
+                        veces_observado, estado, nota_general, nota_promedio,
+                        mejor_nota, peor_nota, total_informes,
+                        ultima_fecha_visto, scout_agregado, url_besoccer
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     nombre, nombre, equipo, posicion,
-                    datetime.now().strftime('%Y-%m-%d'), scout,
-                    nota_promedio, 1, 'Evaluado'
+                    None, '', '', '', None, None,
+                    '', '', '', '',
+                    1, 'Evaluado', nota_promedio, nota_promedio,
+                    nota_promedio, nota_promedio, 1,
+                    datetime.now().strftime('%Y-%m-%d'), scout, ''
                 ))
-                
+
                 jugador_id = cursor.lastrowid
-            
+
             conn.commit()
             logger.info(f"✅ Jugador {'actualizado' if existe else 'añadido'}: {nombre} (ID: {jugador_id})")
             return jugador_id
-            
+
         except Exception as e:
             logger.error(f"❌ Error: {str(e)}")
             conn.rollback()
             raise
+
         finally:
             conn.close()
     
@@ -630,13 +639,13 @@ class JugadorModel:
         conn = sqlite3.connect(self.db_path)
         df = pd.read_sql_query('''
             SELECT *, 
-                   CASE 
-                       WHEN veces_observado = 1 THEN 'Nuevo'
-                       WHEN veces_observado <= 3 THEN 'Seguimiento'
-                       ELSE 'Objetivo'
-                   END as estado_observacion
-            FROM jugadores 
-            ORDER BY ultimo_informe_fecha DESC
+                CASE 
+                    WHEN veces_observado = 1 THEN 'Nuevo'
+                    WHEN veces_observado <= 3 THEN 'Seguimiento'
+                    ELSE 'Objetivo'
+                END as estado_observacion
+            FROM jugadores_observados
+            ORDER BY ultima_fecha_visto DESC
         ''', conn)
         conn.close()
         return df
