@@ -295,6 +295,35 @@ class JugadorModel:
         
         # ✅ USAR ESTRUCTURA BÁSICA COMPATIBLE
         cursor.execute('''
+            CREATE TABLE IF NOT EXISTS jugadores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                apellidos TEXT,
+                nombre_completo TEXT,
+                edad INTEGER,
+                posicion TEXT,
+                equipo TEXT,
+                liga TEXT,
+                pais TEXT,
+                altura INTEGER,
+                peso INTEGER,
+                pie_preferido TEXT,
+                valor_mercado REAL,
+                salario REAL,
+                partidos_jugados INTEGER,
+                minutos_jugados INTEGER,
+                goles INTEGER,
+                asistencias INTEGER,
+                tarjetas_amarillas INTEGER,
+                tarjetas_rojas INTEGER,
+                origen_datos TEXT,
+                confianza_match REAL,
+                veces_observado INTEGER DEFAULT 1,
+                ultimo_informe_fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS jugadores_observados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 jugador TEXT,
@@ -349,79 +378,107 @@ class JugadorModel:
         # Poblar con datos de ejemplo si está vacía
         self.poblar_datos_ejemplo()
     
-    def añadir_jugador_observado(self, datos_wyscout, confianza, algoritmo, informe_id=None):
+    def añadir_jugador_observado(self, datos, informe_data=None):
         """
-        ✅ VERSIÓN COMPATIBLE - Añade jugador usando solo columnas existentes
+        Inserta o actualiza un jugador en la tabla jugadores_observados
+        usando datos combinados de Wyscout o BeSoccer + informe
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Extraer datos usando el mapeo correcto
-        nombre_completo = str(datos_wyscout.get(self.column_mapping['nombre'], ''))
-        partes_nombre = nombre_completo.split(' ', 1)
-        primer_nombre = partes_nombre[0] if partes_nombre else ''
-        apellidos = partes_nombre[1] if len(partes_nombre) > 1 else ''
+        nombre = str(datos.get("jugador", "")).strip()
+        equipo = str(datos.get("equipo_actual", "")).strip() or str(datos.get("equipo", "")).strip()
+        nombre_completo = nombre  # En muchos casos no tienes nombre + apellidos
         
-        equipo = str(datos_wyscout.get(self.column_mapping['equipo'], ''))
-        
-        # Verificar si el jugador ya existe
+        # Buscar jugador existente
         cursor.execute('''
-            SELECT id, veces_observado FROM jugadores 
-            WHERE nombre_completo = ? AND equipo = ?
+            SELECT id, veces_observado, nota_promedio, mejor_nota, peor_nota, total_informes
+            FROM jugadores_observados
+            WHERE LOWER(TRIM(nombre_completo)) = LOWER(TRIM(?)) AND LOWER(TRIM(equipo)) = LOWER(TRIM(?))
         ''', (nombre_completo, equipo))
         
         jugador_existente = cursor.fetchone()
         
-        if jugador_existente:
-            # Actualizar jugador existente
-            jugador_id, veces_observado = jugador_existente
-            cursor.execute('''
-                UPDATE jugadores SET 
-                    veces_observado = ?,
-                    ultimo_informe_fecha = CURRENT_TIMESTAMP,
-                    confianza_match = ?
-                WHERE id = ?
-            ''', (veces_observado + 1, confianza, jugador_id))
-            
-            logger.info(f"📝 Jugador actualizado: {nombre_completo} (observado {veces_observado + 1} veces)")
-            
-        else:
-            # ✅ INSERTAR SOLO COLUMNAS QUE EXISTEN EN LA BD ACTUAL
-            cursor.execute('''
-                INSERT INTO jugadores (
-                    nombre, apellidos, nombre_completo, edad, posicion,
-                    equipo, pais, altura, peso, pie_preferido, valor_mercado,
-                    partidos_jugados, minutos_jugados, goles, asistencias, 
-                    tarjetas_amarillas, tarjetas_rojas,
-                    origen_datos, confianza_match
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                primer_nombre, apellidos, nombre_completo,
-                self._safe_int(datos_wyscout.get(self.column_mapping['edad'])),
-                str(datos_wyscout.get(self.column_mapping['posicion'], '')),
-                equipo,
-                str(datos_wyscout.get(self.column_mapping['pais'], '')),
-                self._safe_int(datos_wyscout.get(self.column_mapping['altura'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['peso'])),
-                str(datos_wyscout.get(self.column_mapping['pie_preferido'], '')),
-                self._safe_float(datos_wyscout.get(self.column_mapping['valor_mercado'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['partidos_jugados'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['minutos'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['goles'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['asistencias'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['tarjetas_amarillas'])),
-                self._safe_int(datos_wyscout.get(self.column_mapping['tarjetas_rojas'])),
-                'wyscout',
-                confianza
-            ))
-            
-            jugador_id = cursor.lastrowid
-            logger.info(f"✅ Nuevo jugador añadido: {nombre_completo} (ID: {jugador_id})")
+        # Sacamos la nota del informe (por defecto 5 si no hay)
+        nueva_nota = informe_data.get("nota_general", 5) if informe_data else 5
+        scout = informe_data.get("scout_usuario", "admin") if informe_data else "admin"
+        fecha_actual = datetime.now().strftime('%Y-%m-%d')
         
-        conn.commit()
-        conn.close()
+        try:
+            if jugador_existente:
+                jugador_id, veces_observado, nota_promedio, mejor_nota, peor_nota, total_informes = jugador_existente
+                veces_observado += 1
+                total_informes = (total_informes or 0) + 1
+                
+                nueva_nota_prom = ((nota_promedio or 0) * (veces_observado - 1) + nueva_nota) / veces_observado
+                mejor_nota = max(mejor_nota or nueva_nota, nueva_nota)
+                peor_nota = min(peor_nota or nueva_nota, nueva_nota)
+                
+                cursor.execute('''
+                    UPDATE jugadores_observados SET
+                        veces_observado = ?,
+                        total_informes = ?,
+                        nota_general = ?,
+                        nota_promedio = ?,
+                        mejor_nota = ?,
+                        peor_nota = ?,
+                        ultima_fecha_visto = ?,
+                        scout_agregado = ?,
+                        url_besoccer = COALESCE(?, url_besoccer),
+                        imagen_url = COALESCE(?, imagen_url),
+                        escudo_equipo = COALESCE(?, escudo_equipo)
+                    WHERE id = ?
+                ''', (
+                    veces_observado, total_informes, nueva_nota, nueva_nota_prom,
+                    mejor_nota, peor_nota, fecha_actual, scout,
+                    datos.get("url_besoccer", ""),
+                    datos.get("imagen_url", ""),
+                    datos.get("escudo_equipo", ""),
+                    jugador_id
+                ))
+                logger.info(f"🔁 Jugador actualizado: {nombre} ({equipo})")
+            
+            else:
+                # Insertar nuevo
+                cursor.execute('''
+                    INSERT INTO jugadores_observados (
+                        jugador, nombre_completo, equipo, posicion_principal, posicion_secundaria,
+                        edad, nacionalidad, liga, pie_dominante, altura, peso,
+                        valor_mercado, elo_besoccer, imagen_url, escudo_equipo,
+                        veces_observado, estado, nota_general, nota_promedio,
+                        mejor_nota, peor_nota, total_informes,
+                        ultima_fecha_visto, scout_agregado, url_besoccer
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    nombre, nombre_completo, equipo,
+                    datos.get("posicion_principal", ""),
+                    datos.get("posicion_secundaria", ""),
+                    datos.get("edad"),
+                    datos.get("nacionalidad", ""),
+                    datos.get("liga_actual", ""),
+                    datos.get("pie_preferido", ""),
+                    datos.get("altura"),
+                    datos.get("peso"),
+                    datos.get("valor_mercado", ""),
+                    datos.get("elo"),
+                    datos.get("imagen_url", ""),
+                    datos.get("escudo_equipo", ""),
+                    1, 'Evaluado',
+                    nueva_nota, nueva_nota, nueva_nota, nueva_nota, 1,
+                    fecha_actual, scout, datos.get("url_besoccer", "")
+                ))
+                jugador_id = cursor.lastrowid
+                logger.info(f"✅ Nuevo jugador añadido: {nombre} ({equipo}) - ID: {jugador_id}")
+            
+            conn.commit()
+            return jugador_id
         
-        return jugador_id
+        except Exception as e:
+            logger.error(f"❌ Error añadiendo jugador observado: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
 
     def añadir_jugador_manual(self, nombre, equipo, posicion='N/A', nota_promedio=5, scout='admin', informe_id=None):
         """
