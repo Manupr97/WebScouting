@@ -1278,7 +1278,7 @@ with tab2:
         col1, col2 = st.columns(2)
         with col1:
             if st.button("⚽ Crear Mi Primer Informe", use_container_width=True, type="primary"):
-                st.switch_page("4_⚽_Centro de Scouting")
+                st.switch_page("pages/4_⚽_Centro de Scouting.py")
         
         with col2:
             if st.button("📚 Ver Tutorial", use_container_width=True):
@@ -1350,7 +1350,7 @@ with tab3:
     else:
         st.info("📋 Lista de objetivos vacía")
         if st.button("💎 Ir a Discovery", use_container_width=True):
-            st.switch_page("1_🔍_Jugadores")
+            st.switch_page("pages/1_🔍_Jugadores.py")
 
 # ==================== PESTAÑA 4: BÚSQUEDA GLOBAL ====================
 with tab4:
@@ -1422,16 +1422,16 @@ with st.sidebar:
     st.markdown("### 🚀 Navegación")
     
     if st.button("🏠 Dashboard", use_container_width=True):
-        st.switch_page("1_🔍_Jugadores")
+        st.switch_page("pages/1_🔍_Jugadores.py")
     
     if st.button("📊 Visualizaciones", use_container_width=True):
-        st.switch_page("3_📊_Visualizaciones")
+        st.switch_page("pages/3_📊_Visualizaciones.py")
     
     if st.button("⚽ Scouting en Vivo", use_container_width=True):
-        st.switch_page("4_⚽_Centro de Scouting")
+        st.switch_page("pages/4_⚽_Centro de Scouting.py")
     
     if st.button("📋 Mis Informes", use_container_width=True):
-        st.switch_page("5_📋_Mis_Informes")
+        st.switch_page("pages/5_📋_Mis_Informes.py")
     
     st.markdown("---")
     

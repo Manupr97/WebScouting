@@ -104,7 +104,7 @@ nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
 
 with nav_col1:
     if st.button("🔙 Volver a Partidos", use_container_width=True):
-        st.switch_page("4_⚽_Centro de Scouting")
+        st.switch_page("pages/4_⚽_Centro de Scouting.py")
 
 st.markdown("---")
 
@@ -2803,7 +2803,7 @@ try:
         st.write("Los informes de scouting aparecerán aquí cuando evalúes jugadores.")
         
         if st.button("🏟️ Crear Mi Primer Informe", use_container_width=True):
-            st.switch_page("4_⚽_Centro de Scouting")
+            st.switch_page("pages/4_⚽_Centro de Scouting.py")
         st.stop()
     
     # Log inicial simplificado
@@ -3226,7 +3226,7 @@ with st.sidebar:
         st.rerun()
     
     if st.button("📝 Crear Nuevo Informe", use_container_width=True):
-        st.switch_page("4_⚽_Centro de Scouting")
+        st.switch_page("pages/4_⚽_Centro de Scouting.py")
     
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         login_manager.logout()

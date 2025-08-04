@@ -14,3 +14,5 @@ lxml
 mplsoccer
 fuzzywuzzy
 fpdf2
+reportlab==4.4.3
+statsmodels==0.14.5
