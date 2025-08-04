@@ -295,52 +295,35 @@ class JugadorModel:
         
         # ✅ USAR ESTRUCTURA BÁSICA COMPATIBLE
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS jugadores (
+            CREATE TABLE IF NOT EXISTS jugadores_observados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT NOT NULL,
-                apellidos TEXT,
+                jugador TEXT,
                 nombre_completo TEXT,
-                edad INTEGER,
-                posicion TEXT,
                 equipo TEXT,
+                posicion TEXT,
+                posicion_principal TEXT,
+                posicion_secundaria TEXT,
+                numero_camiseta INTEGER,
+                edad INTEGER,
+                nacionalidad TEXT,
                 liga TEXT,
-                pais TEXT,
+                pie_dominante TEXT,
                 altura INTEGER,
                 peso INTEGER,
-                pie_preferido TEXT,
-                valor_mercado REAL,
-                salario REAL,
-                
-                -- Estadísticas básicas
-                partidos_jugados INTEGER DEFAULT 0,
-                minutos_jugados INTEGER DEFAULT 0,
-                goles INTEGER DEFAULT 0,
-                asistencias INTEGER DEFAULT 0,
-                tarjetas_amarillas INTEGER DEFAULT 0,
-                tarjetas_rojas INTEGER DEFAULT 0,
-                
-                -- Estadísticas avanzadas básicas
-                pases_completados INTEGER DEFAULT 0,
-                pases_intentados INTEGER DEFAULT 0,
-                precision_pases REAL DEFAULT 0,
-                regates_completados INTEGER DEFAULT 0,
-                regates_intentados INTEGER DEFAULT 0,
-                duelos_aereos_ganados INTEGER DEFAULT 0,
-                duelos_aereos_totales INTEGER DEFAULT 0,
-                interceptaciones INTEGER DEFAULT 0,
-                recuperaciones INTEGER DEFAULT 0,
-                
-                -- Información de scouting
+                valor_mercado TEXT,
+                elo_besoccer INTEGER,
+                imagen_url TEXT,
+                escudo_equipo TEXT,
                 veces_observado INTEGER DEFAULT 1,
-                primer_informe_fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ultimo_informe_fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                origen_datos TEXT DEFAULT 'wyscout',
-                confianza_match REAL DEFAULT 100.0,
-                
-                -- Información adicional
-                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                lesionado BOOLEAN DEFAULT 0,
-                agente TEXT
+                estado TEXT DEFAULT 'Evaluado',
+                nota_general REAL,
+                nota_promedio REAL,
+                mejor_nota REAL,
+                peor_nota REAL,
+                total_informes INTEGER,
+                ultima_fecha_visto DATE,
+                scout_agregado TEXT,
+                url_besoccer TEXT
             )
         ''')
         
