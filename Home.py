@@ -850,7 +850,7 @@ def main():
             
             with col_nuevo1:
                 if st.button("🎯 1. Base de Datos", use_container_width=True, type="primary"):
-                    st.switch_page("📊 Bases Datos Unificadas")
+                    st.switch_page("pages/2_📊_Bases_Datos_Unificadas.py")
                 st.caption("Descubre los 574 jugadores de LaLiga disponibles")
             
             with col_nuevo2:
