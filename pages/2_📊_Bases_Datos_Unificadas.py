@@ -15,6 +15,11 @@ sys.path.append(parent_dir)
 from common.login import LoginManager
 from models.wyscout_model import WyscoutModel
 from models.jugador_model import JugadorModel
+
+# Inicializar modelo y forzar creación de tablas si no existen
+jm = JugadorModel()
+jm.init_database()  # Asegura que la tabla 'jugadores_observados' exista
+
 from utils.normalizacion import normalizar_nombre_metrica
 from utils.normalizacion import generar_o_cargar_mapping_wyscout
 from utils.aspectos import obtener_aspectos_evaluacion_completa 
