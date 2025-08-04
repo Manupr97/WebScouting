@@ -14,6 +14,11 @@ sys.path.append(parent_dir)
 # Imports del sistema
 from common.login import LoginManager
 from models.partido_model import PartidoModel
+from models.jugador_model import JugadorModel
+
+jm = JugadorModel(db_path="data/jugadores.db")
+jm.init_database()  # fuerza creación de tablas
+
 
 partido_model = PartidoModel()
 

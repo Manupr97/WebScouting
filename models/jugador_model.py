@@ -352,7 +352,11 @@ class JugadorModel:
                 total_informes INTEGER,
                 ultima_fecha_visto DATE,
                 scout_agregado TEXT,
-                url_besoccer TEXT
+                url_besoccer TEXT,
+                datos_json TEXT,
+                ultimo_partido_id TEXT,
+                metricas TEXT,
+                fecha_agregado DATE DEFAULT CURRENT_DATE
             )
         ''')
         
