@@ -214,7 +214,7 @@ def cargar_datos_wyscout_simple():
     """Carga datos directamente del Excel"""
     try:
         # En lugar de: wyscout_model.get_all_players()
-        df = pd.read_excel(r'C:\Users\manue\OneDrive\Escritorio\WebScouting\data\wyscout_LaLiga_limpio.xlsx')
+        df = pd.read_excel(excel_path)
         return df
     except Exception as e:
         st.error(f"Error cargando Excel: {str(e)}")
